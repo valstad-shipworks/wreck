@@ -195,13 +195,5 @@ let swept = Cuboid::from_aabb(Vec3::splat(-1.0), Vec3::splat(1.0))
 
 ## Features
 
-- `convex-polytope` (default) - enables `ConvexPolytope` and the `Stretchable` trait
-- `capt` - enables `Pointcloud` for collision testing against point cloud data using the CAPT spatial index
-
-## Performance notes
-
-Most collision routines have multiple tiers of early-outs. For example capsule-cuboid does a bounding sphere check first, then tries a Z-aligned + axis-aligned fast path, and only falls through to the general SIMD path if neither applies. Cuboid-cuboid uses SAT with 15 separating axes but short-circuits to simple AABB overlap when both are axis aligned.
-
-The `collides_many` methods on Sphere use `wide::f32x8` to test 8 candidates per iteration with no branching in the hot loop.
-
-There is a benchmark suite under `benches/` you can run with `cargo bench`.
+- `wreck-assert` — enables internal assertions in all builds
+- `debug-wreck-assert` — enables internal assertions in debug builds only
