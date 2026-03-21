@@ -8,6 +8,7 @@ A 3D collision detection library for Rust. Built on top of `glam` for math and `
 - `Scalable` - uniform scaling of a shape.
 - `Transformable` - translate, rotate (via `Mat3` or `Quat`), or apply a full `Affine3` transform.
 - `Stretchable` - sweep a shape along a translation vector, producing the convex hull of the motion.
+- `Bounded` - compute bounding volumes: `broadphase()` (bounding sphere), `obb()` (oriented bounding box), and `aabb()` (axis-aligned bounding box). Implemented for all volume types, `ConvexPolygon`, `LineSegment`, `Pointcloud`, and `Collider`. For `Collider`, returns infinite bounds if the collider contains any `Plane`, `Line`, or `Ray`.
 
 ## Shapes
 
@@ -158,6 +159,24 @@ sphere.scale(2.0);
 let moved = sphere.clone().translated([5.0, 0.0, 0.0]);
 let rotated = sphere.clone().rotated_quat(glam::Quat::from_rotation_y(1.0));
 let transformed = sphere.clone().transformed(glam::Affine3::IDENTITY);
+```
+
+### Bounding volumes
+
+```rust
+use wreck::Bounded;
+
+// bounding sphere
+let bsphere = capsule.broadphase();
+
+// axis-aligned bounding box
+let aabb = capsule.aabb();
+
+// oriented bounding box
+let obb = capsule.obb();
+
+// works on Collider too — returns infinite bounds if it contains a Plane, Line, or Ray
+let collider_aabb = collider.aabb();
 ```
 
 ### Stretching (swept volumes)

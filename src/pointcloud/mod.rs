@@ -7,6 +7,7 @@ use glam::Vec3;
 use inherent::inherent;
 use wide::{CmpLe, f32x8};
 
+use crate::Bounded;
 use crate::Collides;
 use crate::ConvexPolytope;
 use crate::Scalable;
@@ -93,6 +94,44 @@ impl Scalable for Pointcloud {
             self.point_radius,
             8,
         );
+    }
+}
+
+#[inherent]
+impl Bounded for Pointcloud {
+    pub fn broadphase(&self) -> Sphere {
+        if self.points.is_empty() {
+            return Sphere::new(Vec3::ZERO, 0.0);
+        }
+        let mut min = Vec3::splat(f32::INFINITY);
+        let mut max = Vec3::splat(f32::NEG_INFINITY);
+        for p in &self.points {
+            let v = Vec3::from(*p);
+            min = min.min(v);
+            max = max.max(v);
+        }
+        let center = (min + max) * 0.5;
+        let half_diag = (max - min).length() * 0.5;
+        Sphere::new(center, half_diag + self.point_radius)
+    }
+
+    pub fn obb(&self) -> Cuboid {
+        self.aabb()
+    }
+
+    pub fn aabb(&self) -> Cuboid {
+        if self.points.is_empty() {
+            return Cuboid::from_aabb(Vec3::ZERO, Vec3::ZERO);
+        }
+        let mut min = Vec3::splat(f32::INFINITY);
+        let mut max = Vec3::splat(f32::NEG_INFINITY);
+        for p in &self.points {
+            let v = Vec3::from(*p);
+            min = min.min(v);
+            max = max.max(v);
+        }
+        let r = Vec3::splat(self.point_radius);
+        Cuboid::from_aabb(min - r, max + r)
     }
 }
 
@@ -636,7 +675,7 @@ impl_line_pcl!(Line, f32::NEG_INFINITY, f32::INFINITY);
 impl_line_pcl!(Ray, 0.0, f32::INFINITY);
 impl_line_pcl!(LineSegment, 0.0, 1.0);
 
-pub trait PointCloudMarker: __private::Sealed + Sized + Clone + Debug + Transformable + Scalable {}
+pub trait PointCloudMarker: __private::Sealed + Sized + Clone + Debug + Transformable + Scalable + Bounded {}
 
 impl __private::Sealed for Pointcloud {}
 impl PointCloudMarker for Pointcloud {}

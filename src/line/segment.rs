@@ -7,7 +7,7 @@ use crate::convex_polytope::array::ArrayConvexPolytope;
 use crate::cuboid::Cuboid;
 use crate::plane::{ConvexPolygon, Plane};
 use crate::sphere::Sphere;
-use crate::{Collides, ConvexPolytope, Scalable, Stretchable, Transformable};
+use crate::{Bounded, Collides, ConvexPolytope, Scalable, Stretchable, Transformable};
 
 const T_MIN: f32 = 0.0;
 const T_MAX: f32 = 1.0;
@@ -41,6 +41,32 @@ impl LineSegment {
         let center = self.p1 + 0.5 * self.dir;
         let half_len = self.dir.length() * 0.5;
         (center, half_len)
+    }
+}
+
+#[inherent]
+impl Bounded for LineSegment {
+    pub fn broadphase(&self) -> Sphere {
+        let (center, radius) = self.bounding_sphere();
+        Sphere::new(center, radius)
+    }
+
+    pub fn obb(&self) -> Cuboid {
+        let center = self.p1 + 0.5 * self.dir;
+        let len = self.dir.length();
+        if len < f32::EPSILON {
+            return Cuboid::from_aabb(self.p1, self.p1);
+        }
+        let ax0 = self.dir / len;
+        let ref_vec = if ax0.x.abs() < 0.9 { Vec3::X } else { Vec3::Y };
+        let ax1 = ax0.cross(ref_vec).normalize();
+        let ax2 = ax0.cross(ax1);
+        Cuboid::new(center, [ax0, ax1, ax2], [len * 0.5, 0.0, 0.0])
+    }
+
+    pub fn aabb(&self) -> Cuboid {
+        let p2 = self.p1 + self.dir;
+        Cuboid::from_aabb(self.p1.min(p2), self.p1.max(p2))
     }
 }
 

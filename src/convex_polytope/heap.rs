@@ -3,7 +3,7 @@ use glam::Vec3;
 use inherent::inherent;
 
 use crate::wreck_assert;
-use crate::{Collides, Scalable, Stretchable, Transformable};
+use crate::{Bounded, Collides, Scalable, Stretchable, Transformable};
 use crate::cuboid::Cuboid;
 use crate::sphere::Sphere;
 use super::*;
@@ -34,6 +34,21 @@ impl ConvexPolytope {
     #[inline]
     fn as_ref(&self) -> RefConvexPolytope<'_> {
         RefConvexPolytope::from_heap(self)
+    }
+}
+
+#[inherent]
+impl Bounded for ConvexPolytope {
+    pub fn broadphase(&self) -> Sphere {
+        Sphere::new(self.obb.center, self.obb.bounding_sphere_radius())
+    }
+
+    pub fn obb(&self) -> Cuboid {
+        self.obb
+    }
+
+    pub fn aabb(&self) -> Cuboid {
+        self.obb.aabb()
     }
 }
 

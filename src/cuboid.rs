@@ -6,7 +6,7 @@ use inherent::inherent;
 use crate::capsule::Capsule;
 use crate::sphere::Sphere;
 use crate::wreck_assert;
-use crate::{Collides, Scalable, Transformable};
+use crate::{Bounded, Collides, Scalable, Transformable};
 use crate::{ConvexPolytope, Stretchable};
 
 #[derive(Debug, Clone, Copy)]
@@ -121,6 +121,31 @@ impl Cuboid {
             i += 1;
         }
         true
+    }
+}
+
+#[inherent]
+impl Bounded for Cuboid {
+    pub fn broadphase(&self) -> Sphere {
+        Sphere::new(self.center, self.bounding_sphere_radius())
+    }
+
+    pub fn obb(&self) -> Cuboid {
+        *self
+    }
+
+    pub fn aabb(&self) -> Cuboid {
+        if self.axis_aligned {
+            return *self;
+        }
+        let mut he = [0.0f32; 3];
+        let world = [Vec3::X, Vec3::Y, Vec3::Z];
+        for i in 0..3 {
+            he[i] = self.half_extents[0] * self.axes[0].dot(world[i]).abs()
+                + self.half_extents[1] * self.axes[1].dot(world[i]).abs()
+                + self.half_extents[2] * self.axes[2].dot(world[i]).abs();
+        }
+        Cuboid::new(self.center, [Vec3::X, Vec3::Y, Vec3::Z], he)
     }
 }
 

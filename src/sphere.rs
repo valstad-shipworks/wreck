@@ -5,7 +5,7 @@ use inherent::inherent;
 
 
 use crate::Stretchable;
-use crate::{Capsule, Collides, Scalable, Transformable};
+use crate::{Bounded, Capsule, Collides, Cuboid, Scalable, Transformable};
 use crate::wreck_assert;
 
 #[derive(Debug, Clone, Copy)]
@@ -45,6 +45,29 @@ impl Transformable for Sphere {
 
     pub fn transform(&mut self, mat: glam::Affine3) {
         self.center = mat.transform_point3(self.center);
+    }
+}
+
+#[inherent]
+impl Bounded for Sphere {
+    pub fn broadphase(&self) -> Sphere {
+        *self
+    }
+
+    pub fn obb(&self) -> Cuboid {
+        Cuboid::new(
+            self.center,
+            [Vec3::X, Vec3::Y, Vec3::Z],
+            [self.radius, self.radius, self.radius],
+        )
+    }
+
+    pub fn aabb(&self) -> Cuboid {
+        Cuboid::new(
+            self.center,
+            [Vec3::X, Vec3::Y, Vec3::Z],
+            [self.radius, self.radius, self.radius],
+        )
     }
 }
 

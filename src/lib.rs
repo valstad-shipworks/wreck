@@ -56,32 +56,76 @@ pub trait Scalable: Sized + Clone {
         cloned.scale(factor);
         cloned
     }
+    #[inline]
+    fn scale_d(&mut self, factor: f64) {
+        self.scale(factor as f32);
+    }
+    #[inline]
+    fn scaled_d(self, factor: f64) -> Self {
+        self.scaled(factor as f32)
+    }
 }
 
 pub trait Transformable: Sized + Clone {
     fn translate(&mut self, offset: glam::Vec3);
-    fn translated(self, offset: [f32; 3]) -> Self {
+    #[inline]
+    fn translated(self, offset: glam::Vec3) -> Self {
         let mut cloned = self.clone();
-        cloned.translate(glam::Vec3::from(offset));
+        cloned.translate(offset);
         cloned
     }
+    #[inline]
+    fn translate_d(&mut self, offset: glam::DVec3) {
+        self.translate(offset.as_vec3());
+    }
+    #[inline]
+    fn translated_d(self, offset: glam::DVec3) -> Self {
+        self.translated(offset.as_vec3())
+    }
     fn rotate_mat(&mut self, mat: glam::Mat3);
+    #[inline]
     fn rotated_mat(self, mat: glam::Mat3) -> Self {
         let mut cloned = self.clone();
         cloned.rotate_mat(mat);
         cloned
     }
+    #[inline]
+    fn rotate_mat_d(&mut self, mat: glam::DMat3) {
+        self.rotate_mat(mat.as_mat3());
+    }
+    #[inline]
+    fn rotated_mat_d(self, mat: glam::DMat3) -> Self {
+        self.rotated_mat(mat.as_mat3())
+    }
     fn rotate_quat(&mut self, quat: glam::Quat);
+    #[inline]
     fn rotated_quat(self, quat: glam::Quat) -> Self {
         let mut cloned = self.clone();
         cloned.rotate_quat(quat);
         cloned
     }
+    #[inline]
+    fn rotate_quat_d(&mut self, quat: glam::DQuat) {
+        self.rotate_quat(quat.as_quat());
+    }
+    #[inline]
+    fn rotated_quat_d(self, quat: glam::DQuat) -> Self {
+        self.rotated_quat(quat.as_quat())
+    }
     fn transform(&mut self, mat: glam::Affine3);
+    #[inline]
     fn transformed(self, mat: glam::Affine3) -> Self {
         let mut cloned = self.clone();
         cloned.transform(mat);
         cloned
+    }
+    #[inline]
+    fn transform_d(&mut self, mat: glam::DAffine3) {
+        self.transform(mat.as_affine3());
+    }
+    #[inline]
+    fn transformed_d(self, mat: glam::DAffine3) -> Self {
+        self.transformed(mat.as_affine3())
     }
 }
 
@@ -89,6 +133,10 @@ pub trait Stretchable: Sized + Clone {
     type Output;
 
     fn stretch(&self, translation: glam::Vec3) -> Self::Output;
+    #[inline]
+    fn stretch_d(&self, translation: glam::DVec3) -> Self::Output {
+        self.stretch(translation.as_vec3())
+    }
 }
 
 pub trait Collides<T>: Sized + Clone
@@ -99,6 +147,12 @@ where
     fn collides_many(&self, others: &[T]) -> bool {
         others.iter().any(|other| self.collides(other))
     }
+}
+
+pub trait Bounded: Sized + Clone {
+    fn broadphase(&self) -> Sphere;
+    fn obb(&self) -> Cuboid;
+    fn aabb(&self) -> Cuboid;
 }
 
 pub trait CollidesWithEverything<T>:
@@ -357,6 +411,67 @@ impl<PCL: PointCloudMarker> Scalable for Collider<PCL> {
         for segment in &mut self.segments {
             segment.scale(factor);
         }
+    }
+}
+
+impl<PCL: PointCloudMarker> Bounded for Collider<PCL> {
+    fn broadphase(&self) -> Sphere {
+        if !self.planes.is_empty() || !self.lines.is_empty() || !self.rays.is_empty() {
+            return Sphere::new(glam::Vec3::ZERO, f32::INFINITY);
+        }
+        let aabb = self.aabb();
+        Sphere::new(aabb.center, aabb.bounding_sphere_radius())
+    }
+
+    fn obb(&self) -> Cuboid {
+        self.aabb()
+    }
+
+    fn aabb(&self) -> Cuboid {
+        if !self.planes.is_empty() || !self.lines.is_empty() || !self.rays.is_empty() {
+            return Cuboid::new(
+                glam::Vec3::ZERO,
+                [glam::Vec3::X, glam::Vec3::Y, glam::Vec3::Z],
+                [f32::INFINITY, f32::INFINITY, f32::INFINITY],
+            );
+        }
+
+        let mut min = glam::Vec3::splat(f32::INFINITY);
+        let mut max = glam::Vec3::splat(f32::NEG_INFINITY);
+        let mut has_any = false;
+
+        macro_rules! merge_aabb {
+            ($items:expr) => {
+                for item in &$items {
+                    let bb = item.aabb();
+                    let lo = bb.center - glam::Vec3::new(bb.half_extents[0], bb.half_extents[1], bb.half_extents[2]);
+                    let hi = bb.center + glam::Vec3::new(bb.half_extents[0], bb.half_extents[1], bb.half_extents[2]);
+                    min = min.min(lo);
+                    max = max.max(hi);
+                    has_any = true;
+                }
+            };
+        }
+
+        merge_aabb!(self.spheres);
+        merge_aabb!(self.capsules);
+        merge_aabb!(self.cuboids);
+        merge_aabb!(self.polytopes);
+        merge_aabb!(self.polygons);
+        merge_aabb!(self.segments);
+        merge_aabb!(self.pointclouds);
+
+        for pt in &self.points {
+            min = min.min(pt.0);
+            max = max.max(pt.0);
+            has_any = true;
+        }
+
+        if !has_any {
+            return Cuboid::from_aabb(glam::Vec3::ZERO, glam::Vec3::ZERO);
+        }
+
+        Cuboid::from_aabb(min, max)
     }
 }
 

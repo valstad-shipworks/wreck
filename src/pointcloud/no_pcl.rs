@@ -1,5 +1,5 @@
 use crate::convex_polytope::array::ArrayConvexPolytope;
-use crate::{Collides, Scalable, Stretchable, Transformable};
+use crate::{Bounded, Collides, Cuboid, Scalable, Sphere, Stretchable, Transformable};
 
 #[derive(Debug, Clone, Copy)]
 pub struct NoPcl;
@@ -36,6 +36,18 @@ impl<const P: usize, const V: usize> Collides<NoPcl> for ArrayConvexPolytope<P, 
     #[inline]
     fn collides(&self, _other: &NoPcl) -> bool {
         false
+    }
+}
+
+impl Bounded for NoPcl {
+    fn broadphase(&self) -> Sphere {
+        Sphere::new(glam::Vec3::ZERO, 0.0)
+    }
+    fn obb(&self) -> Cuboid {
+        Cuboid::from_aabb(glam::Vec3::ZERO, glam::Vec3::ZERO)
+    }
+    fn aabb(&self) -> Cuboid {
+        Cuboid::from_aabb(glam::Vec3::ZERO, glam::Vec3::ZERO)
     }
 }
 

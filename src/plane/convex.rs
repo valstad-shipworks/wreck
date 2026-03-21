@@ -14,7 +14,7 @@ use super::ref_convex::{
 };
 use crate::sphere::Sphere;
 use crate::wreck_assert;
-use crate::{Collides, ConvexPolytope, Scalable, Stretchable, Transformable};
+use crate::{Bounded, Collides, ConvexPolytope, Scalable, Stretchable, Transformable};
 
 /// A bounded convex polygon in 3D: a flat convex shape defined by a center,
 /// a normal direction, and a list of 2D vertices (in a local tangent frame)
@@ -135,6 +135,35 @@ impl ConvexPolygon {
     #[inline]
     pub(crate) fn bounding_sphere(&self) -> (Vec3, f32) {
         (self.center, self.bounding_radius)
+    }
+}
+
+#[inherent]
+impl Bounded for ConvexPolygon {
+    pub fn broadphase(&self) -> Sphere {
+        Sphere::new(self.center, self.bounding_radius)
+    }
+
+    pub fn obb(&self) -> Cuboid {
+        // Flat slab along the polygon's tangent frame
+        Cuboid::new(
+            self.center,
+            [self.u_axis, self.v_axis, self.normal],
+            [self.bounding_radius, self.bounding_radius, 0.0],
+        )
+    }
+
+    pub fn aabb(&self) -> Cuboid {
+        if self.vertices_3d.is_empty() {
+            return Cuboid::from_aabb(self.center, self.center);
+        }
+        let mut min = self.vertices_3d[0];
+        let mut max = self.vertices_3d[0];
+        for &v in &self.vertices_3d[1..] {
+            min = min.min(v);
+            max = max.max(v);
+        }
+        Cuboid::from_aabb(min, max)
     }
 }
 

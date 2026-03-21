@@ -10,7 +10,7 @@ use crate::wreck_assert;
 
 use crate::Cuboid;
 use crate::sphere::Sphere;
-use crate::{Collides, Scalable, Transformable};
+use crate::{Bounded, Collides, Scalable, Transformable};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Capsule {
@@ -74,6 +74,44 @@ impl Capsule {
             self.dir.length() * 0.5
         };
         (center, half_len + self.radius)
+    }
+}
+
+#[inherent]
+impl Bounded for Capsule {
+    pub fn broadphase(&self) -> Sphere {
+        let (center, radius) = self.bounding_sphere();
+        Sphere::new(center, radius)
+    }
+
+    pub fn obb(&self) -> Cuboid {
+        let center = self.p1 + 0.5 * self.dir;
+        let dir_len = self.dir.length();
+        if dir_len < f32::EPSILON {
+            // Degenerate capsule: just a sphere
+            return Cuboid::new(
+                center,
+                [Vec3::X, Vec3::Y, Vec3::Z],
+                [self.radius, self.radius, self.radius],
+            );
+        }
+        let ax0 = self.dir / dir_len;
+        // Build perpendicular axes
+        let ref_vec = if ax0.x.abs() < 0.9 { Vec3::X } else { Vec3::Y };
+        let ax1 = ax0.cross(ref_vec).normalize();
+        let ax2 = ax0.cross(ax1);
+        Cuboid::new(
+            center,
+            [ax0, ax1, ax2],
+            [dir_len * 0.5 + self.radius, self.radius, self.radius],
+        )
+    }
+
+    pub fn aabb(&self) -> Cuboid {
+        let p2 = self.p1 + self.dir;
+        let min = self.p1.min(p2) - Vec3::splat(self.radius);
+        let max = self.p1.max(p2) + Vec3::splat(self.radius);
+        Cuboid::from_aabb(min, max)
     }
 }
 
