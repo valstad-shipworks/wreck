@@ -1,0 +1,27 @@
+[package]
+name = "wreck"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+authors = ["Bowan Foryt <bowan@valstad.com>"]
+description = "Library for collision detection of 3d shapes"
+repository = "https://github.com/valstad-shipworks/wreck"
+
+[features]
+debug-wreck-assert = []
+wreck-assert = []
+
+[dependencies]
+glam = "0.32.1"
+wide = "1.2.0"
+inherent = "1.0.13"
+aligned-vec = "0.6.4"
+static_assertions = "1.1.0"
+
+[dev-dependencies]
+criterion = "0.8.2"
+rand = "0.9"
+
+[[bench]]
+name = "collisions"
+harness = false
