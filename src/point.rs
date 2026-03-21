@@ -2,7 +2,7 @@ use glam::Vec3;
 
 use inherent::inherent;
 
-use crate::{Collides, Stretchable, Transformable, Scalable};
+use crate::{Bounded, Collides, Stretchable, Transformable, Scalable};
 use crate::line::LineSegment;
 use crate::capsule::Capsule;
 use crate::cuboid::Cuboid;
@@ -43,6 +43,21 @@ impl Transformable for Point {
     }
 }
 
+#[inherent]
+impl Bounded for Point {
+    pub fn broadphase(&self) -> crate::Sphere {
+        crate::Sphere::new(self.0, 0.0)
+    }
+
+    pub fn obb(&self) -> crate::Cuboid {
+        crate::Cuboid::new(self.0, [Vec3::X, Vec3::Y, Vec3::Z], [0.0, 0.0, 0.0])
+    }
+
+    pub fn aabb(&self) -> crate::Cuboid {
+        crate::Cuboid::new(self.0, [Vec3::X, Vec3::Y, Vec3::Z], [0.0, 0.0, 0.0])
+    }
+}
+
 impl Stretchable for Point {
     type Output = LineSegment;
 
@@ -54,7 +69,7 @@ impl Stretchable for Point {
 // Point-Sphere
 impl Collides<Sphere> for Point {
     #[inline]
-    fn collides(&self, sphere: &Sphere) -> bool {
+    fn test<const BROADPHASE: bool>(&self, sphere: &Sphere) -> bool {
         let d = self.0 - sphere.center;
         d.dot(d) <= sphere.radius * sphere.radius
     }
@@ -62,15 +77,15 @@ impl Collides<Sphere> for Point {
 
 impl Collides<Point> for Sphere {
     #[inline]
-    fn collides(&self, point: &Point) -> bool {
-        point.collides(self)
+    fn test<const BROADPHASE: bool>(&self, point: &Point) -> bool {
+        point.test::<BROADPHASE>(self)
     }
 }
 
 // Point-Capsule
 impl Collides<Capsule> for Point {
     #[inline]
-    fn collides(&self, capsule: &Capsule) -> bool {
+    fn test<const BROADPHASE: bool>(&self, capsule: &Capsule) -> bool {
         let closest = capsule.closest_point_to(self.0);
         let d = self.0 - closest;
         d.dot(d) <= capsule.radius * capsule.radius
@@ -79,23 +94,23 @@ impl Collides<Capsule> for Point {
 
 impl Collides<Point> for Capsule {
     #[inline]
-    fn collides(&self, point: &Point) -> bool {
-        point.collides(self)
+    fn test<const BROADPHASE: bool>(&self, point: &Point) -> bool {
+        point.test::<BROADPHASE>(self)
     }
 }
 
 // Point-Cuboid
 impl Collides<Cuboid> for Point {
     #[inline]
-    fn collides(&self, cuboid: &Cuboid) -> bool {
+    fn test<const BROADPHASE: bool>(&self, cuboid: &Cuboid) -> bool {
         cuboid.point_dist_sq(self.0) <= 0.0
     }
 }
 
 impl Collides<Point> for Cuboid {
     #[inline]
-    fn collides(&self, point: &Point) -> bool {
-        point.collides(self)
+    fn test<const BROADPHASE: bool>(&self, point: &Point) -> bool {
+        point.test::<BROADPHASE>(self)
     }
 }
 
@@ -103,22 +118,22 @@ impl Collides<Point> for Cuboid {
 
 impl Collides<crate::ConvexPolytope> for Point {
     #[inline]
-    fn collides(&self, polytope: &crate::ConvexPolytope) -> bool {
-        crate::convex_polytope::refer::RefConvexPolytope::from_heap(polytope).collides_point(self)
+    fn test<const BROADPHASE: bool>(&self, polytope: &crate::ConvexPolytope) -> bool {
+        crate::convex_polytope::refer::RefConvexPolytope::from_heap(polytope).collides_point::<BROADPHASE>(self)
     }
 }
 
 impl Collides<Point> for crate::ConvexPolytope {
     #[inline]
-    fn collides(&self, point: &Point) -> bool {
-        point.collides(self)
+    fn test<const BROADPHASE: bool>(&self, point: &Point) -> bool {
+        point.test::<BROADPHASE>(self)
     }
 }
 
 // Point-Point
 impl Collides<Point> for Point {
     #[inline]
-    fn collides(&self, other: &Point) -> bool {
+    fn test<const BROADPHASE: bool>(&self, other: &Point) -> bool {
         self.0 == other.0
     }
 }
@@ -127,50 +142,50 @@ impl Collides<Point> for Point {
 
 impl Collides<crate::Plane> for Point {
     #[inline]
-    fn collides(&self, _other: &crate::Plane) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &crate::Plane) -> bool { false }
 }
 
 impl Collides<Point> for crate::Plane {
     #[inline]
-    fn collides(&self, _other: &Point) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &Point) -> bool { false }
 }
 
 impl Collides<crate::ConvexPolygon> for Point {
     #[inline]
-    fn collides(&self, _other: &crate::ConvexPolygon) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &crate::ConvexPolygon) -> bool { false }
 }
 
 impl Collides<Point> for crate::ConvexPolygon {
     #[inline]
-    fn collides(&self, _other: &Point) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &Point) -> bool { false }
 }
 
 impl Collides<crate::Line> for Point {
     #[inline]
-    fn collides(&self, _other: &crate::Line) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &crate::Line) -> bool { false }
 }
 
 impl Collides<Point> for crate::Line {
     #[inline]
-    fn collides(&self, _other: &Point) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &Point) -> bool { false }
 }
 
 impl Collides<crate::Ray> for Point {
     #[inline]
-    fn collides(&self, _other: &crate::Ray) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &crate::Ray) -> bool { false }
 }
 
 impl Collides<Point> for crate::Ray {
     #[inline]
-    fn collides(&self, _other: &Point) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &Point) -> bool { false }
 }
 
 impl Collides<LineSegment> for Point {
     #[inline]
-    fn collides(&self, _other: &LineSegment) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &LineSegment) -> bool { false }
 }
 
 impl Collides<Point> for LineSegment {
     #[inline]
-    fn collides(&self, _other: &Point) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &Point) -> bool { false }
 }

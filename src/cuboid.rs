@@ -207,65 +207,14 @@ fn sphere_cuboid_collides(sphere: &Sphere, cuboid: &Cuboid) -> bool {
 
 impl Collides<Cuboid> for Sphere {
     #[inline]
-    fn collides(&self, other: &Cuboid) -> bool {
+    fn test<const BROADPHASE: bool>(&self, other: &Cuboid) -> bool {
         sphere_cuboid_collides(self, other)
-    }
-
-    fn collides_many(&self, others: &[Cuboid]) -> bool {
-        let cx = f32x8::splat(self.center.x);
-        let cy = f32x8::splat(self.center.y);
-        let cz = f32x8::splat(self.center.z);
-        let r_sq = f32x8::splat(self.radius * self.radius);
-        let zero = f32x8::splat(0.0);
-
-        let chunks = others.chunks_exact(8);
-        let remainder = chunks.remainder();
-
-        for chunk in chunks {
-            // For each cuboid we need center, 3 axes, 3 half-extents = 13 values
-            // Process them in SoA layout
-            let mut ocx = [0.0f32; 8];
-            let mut ocy = [0.0f32; 8];
-            let mut ocz = [0.0f32; 8];
-            for (i, c) in chunk.iter().enumerate() {
-                ocx[i] = c.center.x;
-                ocy[i] = c.center.y;
-                ocz[i] = c.center.z;
-            }
-            let dfx = cx - f32x8::new(ocx);
-            let dfy = cy - f32x8::new(ocy);
-            let dfz = cz - f32x8::new(ocz);
-
-            let mut dist_sq = zero;
-            for axis_idx in 0..3 {
-                let mut ax = [0.0f32; 8];
-                let mut ay = [0.0f32; 8];
-                let mut az = [0.0f32; 8];
-                let mut he = [0.0f32; 8];
-                for (i, c) in chunk.iter().enumerate() {
-                    ax[i] = c.axes[axis_idx].x;
-                    ay[i] = c.axes[axis_idx].y;
-                    az[i] = c.axes[axis_idx].z;
-                    he[i] = c.half_extents[axis_idx];
-                }
-                let proj = dfx * f32x8::new(ax) + dfy * f32x8::new(ay) + dfz * f32x8::new(az);
-                let abs_proj = proj.max(-proj);
-                let excess = (abs_proj - f32x8::new(he)).max(zero);
-                dist_sq = dist_sq + excess * excess;
-            }
-
-            if dist_sq.simd_le(r_sq).any() {
-                return true;
-            }
-        }
-
-        remainder.iter().any(|c| sphere_cuboid_collides(self, c))
     }
 }
 
 impl Collides<Sphere> for Cuboid {
     #[inline]
-    fn collides(&self, other: &Sphere) -> bool {
+    fn test<const BROADPHASE: bool>(&self, other: &Sphere) -> bool {
         sphere_cuboid_collides(other, self)
     }
 }
@@ -310,13 +259,15 @@ fn capsule_cuboid_za_aa(capsule: &Capsule, cuboid: &Cuboid) -> bool {
 // Evaluate all 8 candidate t-values (2 endpoints + 6 face-plane intersections)
 // in a single SIMD pass using f32x8.
 #[inline]
-fn capsule_cuboid_collides(capsule: &Capsule, cuboid: &Cuboid) -> bool {
+fn capsule_cuboid_collides<const BROADPHASE: bool>(capsule: &Capsule, cuboid: &Cuboid) -> bool {
     // Bounding sphere early-out
-    let (bc, br) = capsule.bounding_sphere();
-    let d = bc - cuboid.center;
-    let max_r = br + cuboid.bounding_sphere_radius();
-    if d.dot(d) > max_r * max_r {
-        return false;
+    if BROADPHASE {
+        let (bc, br) = capsule.bounding_sphere();
+        let d = bc - cuboid.center;
+        let max_r = br + cuboid.bounding_sphere_radius();
+        if d.dot(d) > max_r * max_r {
+            return false;
+        }
     }
 
     // Fastest path: Z-aligned capsule + axis-aligned cuboid
@@ -400,62 +351,34 @@ fn capsule_cuboid_collides(capsule: &Capsule, cuboid: &Cuboid) -> bool {
 
 impl Collides<Cuboid> for Capsule {
     #[inline]
-    fn collides(&self, other: &Cuboid) -> bool {
-        capsule_cuboid_collides(self, other)
-    }
-
-    fn collides_many(&self, others: &[Cuboid]) -> bool {
-        let (sc, sr) = self.bounding_sphere();
-        crate::broadphase_collides_many(
-            sc,
-            sr,
-            others,
-            |other| (other.center, other.bounding_sphere_radius()),
-            |other| self.collides(other),
-        )
+    fn test<const BROADPHASE: bool>(&self, other: &Cuboid) -> bool {
+        capsule_cuboid_collides::<BROADPHASE>(self, other)
     }
 }
 
 impl Collides<Capsule> for Cuboid {
     #[inline]
-    fn collides(&self, other: &Capsule) -> bool {
-        capsule_cuboid_collides(other, self)
-    }
-
-    fn collides_many(&self, others: &[Capsule]) -> bool {
-        crate::broadphase_collides_many(
-            self.center,
-            self.bounding_sphere_radius(),
-            others,
-            |other| other.bounding_sphere(),
-            |other| self.collides(other),
-        )
+    fn test<const BROADPHASE: bool>(&self, other: &Capsule) -> bool {
+        capsule_cuboid_collides::<BROADPHASE>(other, self)
     }
 }
 
 // Cuboid-Cuboid collision via Separating Axis Theorem (15 axes)
 impl Collides<Cuboid> for Cuboid {
-    fn collides_many(&self, others: &[Cuboid]) -> bool {
-        crate::broadphase_collides_many(
-            self.center,
-            self.bounding_sphere_radius(),
-            others,
-            |other| (other.center, other.bounding_sphere_radius()),
-            |other| self.collides(other),
-        )
-    }
-
-    fn collides(&self, other: &Cuboid) -> bool {
+    fn test<const BROADPHASE: bool>(&self, other: &Cuboid) -> bool {
         // Both axis-aligned: simple AABB overlap test
         if self.axis_aligned && other.axis_aligned {
             return aabb_aabb_collides(self, other);
         }
 
-        // Bounding sphere early-out
         let t_vec = other.center - self.center;
-        let max_dist = self.bounding_sphere_radius() + other.bounding_sphere_radius();
-        if t_vec.dot(t_vec) > max_dist * max_dist {
-            return false;
+
+        // Bounding sphere early-out
+        if BROADPHASE {
+            let max_dist = self.bounding_sphere_radius() + other.bounding_sphere_radius();
+            if t_vec.dot(t_vec) > max_dist * max_dist {
+                return false;
+            }
         }
 
         let eps = 1e-6f32;

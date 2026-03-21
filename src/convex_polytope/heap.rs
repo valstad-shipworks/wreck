@@ -116,107 +116,50 @@ impl Transformable for ConvexPolytope {
 
 impl Collides<ConvexPolytope> for Sphere {
     #[inline]
-    fn collides(&self, other: &ConvexPolytope) -> bool {
-        other.as_ref().collides_sphere(self)
-    }
-
-    fn collides_many(&self, others: &[ConvexPolytope]) -> bool {
-        crate::broadphase_collides_many(
-            self.center, self.radius, others,
-            |other| (other.obb.center, other.obb.bounding_sphere_radius()),
-            |other| self.collides(other),
-        )
+    fn test<const BROADPHASE: bool>(&self, other: &ConvexPolytope) -> bool {
+        other.as_ref().collides_sphere::<BROADPHASE>(self)
     }
 }
 
 impl Collides<Sphere> for ConvexPolytope {
     #[inline]
-    fn collides(&self, other: &Sphere) -> bool {
-        self.as_ref().collides_sphere(other)
-    }
-
-    fn collides_many(&self, others: &[Sphere]) -> bool {
-        crate::broadphase_collides_many(
-            self.obb.center, self.obb.bounding_sphere_radius(), others,
-            |other| (other.center, other.radius),
-            |other| self.collides(other),
-        )
+    fn test<const BROADPHASE: bool>(&self, other: &Sphere) -> bool {
+        self.as_ref().collides_sphere::<BROADPHASE>(other)
     }
 }
 
 impl Collides<ConvexPolytope> for Cuboid {
     #[inline]
-    fn collides(&self, other: &ConvexPolytope) -> bool {
-        other.as_ref().collides_cuboid(self)
-    }
-
-    fn collides_many(&self, others: &[ConvexPolytope]) -> bool {
-        crate::broadphase_collides_many(
-            self.center, self.bounding_sphere_radius(), others,
-            |other| (other.obb.center, other.obb.bounding_sphere_radius()),
-            |other| self.collides(other),
-        )
+    fn test<const BROADPHASE: bool>(&self, other: &ConvexPolytope) -> bool {
+        other.as_ref().collides_cuboid::<BROADPHASE>(self)
     }
 }
 
 impl Collides<Cuboid> for ConvexPolytope {
     #[inline]
-    fn collides(&self, other: &Cuboid) -> bool {
-        self.as_ref().collides_cuboid(other)
-    }
-
-    fn collides_many(&self, others: &[Cuboid]) -> bool {
-        crate::broadphase_collides_many(
-            self.obb.center, self.obb.bounding_sphere_radius(), others,
-            |other| (other.center, other.bounding_sphere_radius()),
-            |other| self.collides(other),
-        )
+    fn test<const BROADPHASE: bool>(&self, other: &Cuboid) -> bool {
+        self.as_ref().collides_cuboid::<BROADPHASE>(other)
     }
 }
 
 impl Collides<ConvexPolytope> for crate::capsule::Capsule {
     #[inline]
-    fn collides(&self, other: &ConvexPolytope) -> bool {
-        other.as_ref().collides_capsule(self)
-    }
-
-    fn collides_many(&self, others: &[ConvexPolytope]) -> bool {
-        let (sc, sr) = self.bounding_sphere();
-        crate::broadphase_collides_many(
-            sc, sr, others,
-            |other| (other.obb.center, other.obb.bounding_sphere_radius()),
-            |other| self.collides(other),
-        )
+    fn test<const BROADPHASE: bool>(&self, other: &ConvexPolytope) -> bool {
+        other.as_ref().collides_capsule::<BROADPHASE>(self)
     }
 }
 
 impl Collides<crate::capsule::Capsule> for ConvexPolytope {
     #[inline]
-    fn collides(&self, other: &crate::capsule::Capsule) -> bool {
-        self.as_ref().collides_capsule(other)
-    }
-
-    fn collides_many(&self, others: &[crate::capsule::Capsule]) -> bool {
-        crate::broadphase_collides_many(
-            self.obb.center, self.obb.bounding_sphere_radius(), others,
-            |other| other.bounding_sphere(),
-            |other| self.collides(other),
-        )
+    fn test<const BROADPHASE: bool>(&self, other: &crate::capsule::Capsule) -> bool {
+        self.as_ref().collides_capsule::<BROADPHASE>(other)
     }
 }
 
 impl Collides<ConvexPolytope> for ConvexPolytope {
     #[inline]
-    fn collides(&self, other: &ConvexPolytope) -> bool {
-        self.as_ref().collides_polytope(&other.as_ref())
-    }
-
-    fn collides_many(&self, others: &[ConvexPolytope]) -> bool {
-        crate::broadphase_collides_many(
-            self.obb.center, self.obb.bounding_sphere_radius(), others,
-            |other| (other.obb.center, other.obb.bounding_sphere_radius()),
-            |other| self.collides(other),
-        )
+    fn test<const BROADPHASE: bool>(&self, other: &ConvexPolytope) -> bool {
+        self.as_ref().collides_polytope::<BROADPHASE>(&other.as_ref())
     }
 }
 

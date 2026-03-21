@@ -1,5 +1,4 @@
 use glam::{DVec3, Vec3};
-use wide::{f32x8, CmpLe};
 
 use inherent::inherent;
 
@@ -73,45 +72,11 @@ impl Bounded for Sphere {
 
 impl Collides<Sphere> for Sphere {
     #[inline]
-    fn collides(&self, other: &Sphere) -> bool {
+    fn test<const BROADPHASE: bool>(&self, other: &Sphere) -> bool {
         let d = self.center - other.center;
         let dist_sq = d.dot(d);
         let rs = self.radius + other.radius;
         dist_sq <= rs * rs
-    }
-
-    fn collides_many(&self, others: &[Sphere]) -> bool {
-        let cx = f32x8::splat(self.center.x);
-        let cy = f32x8::splat(self.center.y);
-        let cz = f32x8::splat(self.center.z);
-        let sr = f32x8::splat(self.radius);
-
-        let chunks = others.chunks_exact(8);
-        let remainder = chunks.remainder();
-
-        for chunk in chunks {
-            let mut ox = [0.0f32; 8];
-            let mut oy = [0.0f32; 8];
-            let mut oz = [0.0f32; 8];
-            let mut or = [0.0f32; 8];
-            for (i, s) in chunk.iter().enumerate() {
-                ox[i] = s.center.x;
-                oy[i] = s.center.y;
-                oz[i] = s.center.z;
-                or[i] = s.radius;
-            }
-            let dx = cx - f32x8::new(ox);
-            let dy = cy - f32x8::new(oy);
-            let dz = cz - f32x8::new(oz);
-            let dist_sq = dx * dx + dy * dy + dz * dz;
-            let rs = sr + f32x8::new(or);
-            let rs_sq = rs * rs;
-            if dist_sq.simd_le(rs_sq).any() {
-                return true;
-            }
-        }
-
-        remainder.iter().any(|s| self.collides(s))
     }
 }
 

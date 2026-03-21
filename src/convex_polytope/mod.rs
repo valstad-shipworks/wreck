@@ -200,8 +200,8 @@ impl<const P: usize, const V: usize> Collides<ConvexPolytope>
     for ArrayConvexPolytope<P, V>
 {
     #[inline]
-    fn collides(&self, other: &ConvexPolytope) -> bool {
-        RefConvexPolytope::from_array(self).collides_polytope(&RefConvexPolytope::from_heap(other))
+    fn test<const BROADPHASE: bool>(&self, other: &ConvexPolytope) -> bool {
+        RefConvexPolytope::from_array(self).collides_polytope::<BROADPHASE>(&RefConvexPolytope::from_heap(other))
     }
 }
 
@@ -209,8 +209,8 @@ impl<const P: usize, const V: usize> Collides<ArrayConvexPolytope<P, V>>
     for ConvexPolytope
 {
     #[inline]
-    fn collides(&self, other: &ArrayConvexPolytope<P, V>) -> bool {
-        RefConvexPolytope::from_heap(self).collides_polytope(&RefConvexPolytope::from_array(other))
+    fn test<const BROADPHASE: bool>(&self, other: &ArrayConvexPolytope<P, V>) -> bool {
+        RefConvexPolytope::from_heap(self).collides_polytope::<BROADPHASE>(&RefConvexPolytope::from_array(other))
     }
 }
 

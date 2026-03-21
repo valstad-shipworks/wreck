@@ -62,8 +62,8 @@ fn dot8_minus_d(
 
 impl RefConvexPolytope<'_> {
     #[inline]
-    pub(crate) fn collides_sphere(&self, sphere: &Sphere) -> bool {
-        if !sphere.collides(self.obb) {
+    pub(crate) fn collides_sphere<const BROADPHASE: bool>(&self, sphere: &Sphere) -> bool {
+        if BROADPHASE && !sphere.collides(self.obb) {
             return false;
         }
 
@@ -92,8 +92,8 @@ impl RefConvexPolytope<'_> {
     }
 
     #[inline]
-    pub(crate) fn collides_cuboid(&self, cuboid: &Cuboid) -> bool {
-        if !cuboid.collides(self.obb) {
+    pub(crate) fn collides_cuboid<const BROADPHASE: bool>(&self, cuboid: &Cuboid) -> bool {
+        if BROADPHASE && !cuboid.collides(self.obb) {
             return false;
         }
 
@@ -142,11 +142,13 @@ impl RefConvexPolytope<'_> {
     }
 
     #[inline]
-    pub(crate) fn collides_capsule(&self, capsule: &Capsule) -> bool {
-        let (bc, br) = capsule.bounding_sphere();
-        let bounding = Sphere::new(bc, br);
-        if !bounding.collides(self.obb) {
-            return false;
+    pub(crate) fn collides_capsule<const BROADPHASE: bool>(&self, capsule: &Capsule) -> bool {
+        if BROADPHASE {
+            let (bc, br) = capsule.bounding_sphere();
+            let bounding = Sphere::new(bc, br);
+            if !bounding.collides(self.obb) {
+                return false;
+            }
         }
 
         let p1x = f32x8::splat(capsule.p1.x);
@@ -184,8 +186,8 @@ impl RefConvexPolytope<'_> {
     }
 
     #[inline]
-    pub(crate) fn collides_point(&self, point: &Point) -> bool {
-        if self.obb.point_dist_sq(point.0) > 0.0 {
+    pub(crate) fn collides_point<const BROADPHASE: bool>(&self, point: &Point) -> bool {
+        if BROADPHASE && self.obb.point_dist_sq(point.0) > 0.0 {
             return false;
         }
 
@@ -213,9 +215,9 @@ impl RefConvexPolytope<'_> {
     }
 
     #[inline]
-    pub(crate) fn collides_polytope(&self, other: &RefConvexPolytope<'_>) -> bool {
+    pub(crate) fn collides_polytope<const BROADPHASE: bool>(&self, other: &RefConvexPolytope<'_>) -> bool {
         // Broadphase: OBB vs OBB
-        if !self.obb.collides(other.obb) {
+        if BROADPHASE && !self.obb.collides(other.obb) {
             return false;
         }
 

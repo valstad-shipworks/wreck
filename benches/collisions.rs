@@ -328,36 +328,6 @@ fn bench_cuboid_cuboid(c: &mut Criterion) {
     });
 }
 
-fn bench_batch_sphere_sphere(c: &mut Criterion) {
-    let mut rng = SmallRng::seed_from_u64(42);
-    let query = rand_sphere(&mut rng);
-    let targets: Vec<_> = (0..1024).map(|_| rand_sphere(&mut rng)).collect();
-
-    c.bench_function("batch_sphere_sphere_1024", |b| {
-        b.iter(|| black_box(&query).collides_many(black_box(&targets)))
-    });
-}
-
-fn bench_batch_sphere_capsule(c: &mut Criterion) {
-    let mut rng = SmallRng::seed_from_u64(42);
-    let query = rand_sphere(&mut rng);
-    let targets: Vec<_> = (0..1024).map(|_| rand_capsule(&mut rng)).collect();
-
-    c.bench_function("batch_sphere_capsule_1024", |b| {
-        b.iter(|| black_box(&query).collides_many(black_box(&targets)))
-    });
-}
-
-fn bench_batch_sphere_cuboid(c: &mut Criterion) {
-    let mut rng = SmallRng::seed_from_u64(42);
-    let query = rand_sphere(&mut rng);
-    let targets: Vec<_> = (0..1024).map(|_| rand_cuboid(&mut rng)).collect();
-
-    c.bench_function("batch_sphere_cuboid_1024", |b| {
-        b.iter(|| black_box(&query).collides_many(black_box(&targets)))
-    });
-}
-
 fn bench_sphere_polytope(c: &mut Criterion) {
     let mut rng = SmallRng::seed_from_u64(42);
     let polytopes: Vec<_> = (0..N_PAIRS).map(|_| rand_polytope(&mut rng)).collect();
@@ -1176,9 +1146,6 @@ criterion_group!(
     bench_capsule_capsule,
     bench_capsule_cuboid,
     bench_cuboid_cuboid,
-    bench_batch_sphere_sphere,
-    bench_batch_sphere_capsule,
-    bench_batch_sphere_cuboid,
     bench_sphere_aabb,
     bench_capsule_aabb,
     bench_zcapsule_aabb,

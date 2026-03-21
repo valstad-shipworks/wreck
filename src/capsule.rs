@@ -1,5 +1,4 @@
 use glam::Vec3;
-use wide::{CmpLe, f32x8};
 
 use inherent::inherent;
 
@@ -173,102 +172,31 @@ fn sphere_capsule_collides(sphere: &Sphere, capsule: &Capsule) -> bool {
 
 impl Collides<Capsule> for Sphere {
     #[inline]
-    fn collides(&self, other: &Capsule) -> bool {
+    fn test<const BROADPHASE: bool>(&self, other: &Capsule) -> bool {
         sphere_capsule_collides(self, other)
-    }
-
-    fn collides_many(&self, others: &[Capsule]) -> bool {
-        let cx = f32x8::splat(self.center.x);
-        let cy = f32x8::splat(self.center.y);
-        let cz = f32x8::splat(self.center.z);
-        let sr = f32x8::splat(self.radius);
-        let zero = f32x8::splat(0.0);
-        let one = f32x8::splat(1.0);
-
-        let chunks = others.chunks_exact(8);
-        let remainder = chunks.remainder();
-
-        for chunk in chunks {
-            let mut p1x = [0.0f32; 8];
-            let mut p1y = [0.0f32; 8];
-            let mut p1z = [0.0f32; 8];
-            let mut dx = [0.0f32; 8];
-            let mut dy = [0.0f32; 8];
-            let mut dz = [0.0f32; 8];
-            let mut rdv = [0.0f32; 8];
-            let mut cr = [0.0f32; 8];
-            for (i, c) in chunk.iter().enumerate() {
-                p1x[i] = c.p1.x;
-                p1y[i] = c.p1.y;
-                p1z[i] = c.p1.z;
-                dx[i] = c.dir.x;
-                dy[i] = c.dir.y;
-                dz[i] = c.dir.z;
-                rdv[i] = c.rdv;
-                cr[i] = c.radius;
-            }
-            let p1x = f32x8::new(p1x);
-            let p1y = f32x8::new(p1y);
-            let p1z = f32x8::new(p1z);
-            let dx = f32x8::new(dx);
-            let dy = f32x8::new(dy);
-            let dz = f32x8::new(dz);
-            let rdv = f32x8::new(rdv);
-            let cr = f32x8::new(cr);
-
-            let dfx = cx - p1x;
-            let dfy = cy - p1y;
-            let dfz = cz - p1z;
-            let t = ((dfx * dx + dfy * dy + dfz * dz) * rdv).max(zero).min(one);
-
-            let clx = p1x + dx * t;
-            let cly = p1y + dy * t;
-            let clz = p1z + dz * t;
-
-            let ex = cx - clx;
-            let ey = cy - cly;
-            let ez = cz - clz;
-            let dist_sq = ex * ex + ey * ey + ez * ez;
-
-            let rs = sr + cr;
-            if dist_sq.simd_le(rs * rs).any() {
-                return true;
-            }
-        }
-
-        remainder.iter().any(|c| sphere_capsule_collides(self, c))
     }
 }
 
 impl Collides<Sphere> for Capsule {
     #[inline]
-    fn collides(&self, other: &Sphere) -> bool {
+    fn test<const BROADPHASE: bool>(&self, other: &Sphere) -> bool {
         sphere_capsule_collides(other, self)
     }
 }
 
 // Capsule-Capsule: closest distance between two line segments (Ericson RTCD)
 impl Collides<Capsule> for Capsule {
-    fn collides_many(&self, others: &[Capsule]) -> bool {
-        let (sc, sr) = self.bounding_sphere();
-        crate::broadphase_collides_many(
-            sc,
-            sr,
-            others,
-            |other| other.bounding_sphere(),
-            |other| self.collides(other),
-        )
-    }
-
     #[inline]
-    fn collides(&self, other: &Capsule) -> bool {
+    fn test<const BROADPHASE: bool>(&self, other: &Capsule) -> bool {
         // Bounding sphere early-out
-        let (c1, r1) = self.bounding_sphere();
-        let (c2, r2) = other.bounding_sphere();
-        let d = c1 - c2;
-        let max_r = r1 + r2;
-        if d.dot(d) > max_r * max_r {
-            return false;
+        if BROADPHASE {
+            let (c1, r1) = self.bounding_sphere();
+            let (c2, r2) = other.bounding_sphere();
+            let d = c1 - c2;
+            let max_r = r1 + r2;
+            if d.dot(d) > max_r * max_r {
+                return false;
+            }
         }
 
         let dist_sq = segment_segment_dist_sq(self.p1, self.dir, other.p1, other.dir);

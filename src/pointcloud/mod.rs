@@ -19,6 +19,7 @@ use crate::cuboid::Cuboid;
 use crate::line::{Line, LineSegment, Ray};
 use crate::plane::ConvexPolygon;
 use crate::plane::Plane;
+use crate::soa::SpheresSoA;
 use crate::sphere::Sphere;
 
 pub use no_pcl::NoPcl;
@@ -26,22 +27,49 @@ pub use no_pcl::NoPcl;
 #[derive(Debug, Clone)]
 pub struct Pointcloud {
     tree: capt::Capt<3, f32, u32>,
-    points: Vec<[f32; 3]>,
+    spheres: SpheresSoA,
     point_radius: f32,
     r_range: (f32, f32),
     inverse_transform: Option<glam::Affine3>,
 }
 
 impl Pointcloud {
+    pub fn inverse_transform(&self) -> Option<&glam::Affine3> {
+        self.inverse_transform.as_ref()
+    }
+
+    pub fn tree(&self) -> &capt::Capt<3, f32, u32> {
+        &self.tree
+    }
+
     pub fn new(points: &[[f32; 3]], r_range: (f32, f32), point_radius: f32) -> Self {
         let tree = capt::Capt::<3, f32, u32>::with_point_radius(points, r_range, point_radius, 8);
+        let mut spheres = SpheresSoA::with_capacity(points.len());
+        for &pt in points {
+            spheres.push(Sphere::new(Vec3::from(pt), point_radius));
+        }
         Self {
             tree,
-            points: points.to_vec(),
+            spheres,
             point_radius,
             r_range,
             inverse_transform: None,
         }
+    }
+
+    #[inline]
+    fn point_count(&self) -> usize {
+        self.spheres.len()
+    }
+
+    #[inline]
+    fn full_chunks(&self) -> usize {
+        self.spheres.len() / 8
+    }
+
+    #[inline]
+    fn remainder_start(&self) -> usize {
+        self.full_chunks() * 8
     }
 }
 
@@ -72,10 +100,12 @@ impl Transformable for Pointcloud {
 #[inherent]
 impl Scalable for Pointcloud {
     pub fn scale(&mut self, factor: f32) {
-        for pt in &mut self.points {
-            pt[0] *= factor;
-            pt[1] *= factor;
-            pt[2] *= factor;
+        let n = self.point_count();
+        for i in 0..n {
+            self.spheres.x[i] *= factor;
+            self.spheres.y[i] *= factor;
+            self.spheres.z[i] *= factor;
+            self.spheres.r[i] *= factor;
         }
         self.point_radius *= factor;
         self.r_range.0 *= factor;
@@ -83,13 +113,22 @@ impl Scalable for Pointcloud {
         // Flush the lazy transform: apply it to points, then clear it
         if let Some(inv) = self.inverse_transform.take() {
             let fwd = inv.inverse();
-            for pt in &mut self.points {
-                let v = fwd.transform_point3(Vec3::from(*pt));
-                *pt = v.to_array();
+            for i in 0..n {
+                let v = fwd.transform_point3(Vec3::new(
+                    self.spheres.x[i],
+                    self.spheres.y[i],
+                    self.spheres.z[i],
+                ));
+                self.spheres.x[i] = v.x;
+                self.spheres.y[i] = v.y;
+                self.spheres.z[i] = v.z;
             }
         }
+        let points: Vec<[f32; 3]> = (0..n)
+            .map(|i| [self.spheres.x[i], self.spheres.y[i], self.spheres.z[i]])
+            .collect();
         self.tree = capt::Capt::<3, f32, u32>::with_point_radius(
-            &self.points,
+            &points,
             self.r_range,
             self.point_radius,
             8,
@@ -100,13 +139,14 @@ impl Scalable for Pointcloud {
 #[inherent]
 impl Bounded for Pointcloud {
     pub fn broadphase(&self) -> Sphere {
-        if self.points.is_empty() {
+        let n = self.point_count();
+        if n == 0 {
             return Sphere::new(Vec3::ZERO, 0.0);
         }
         let mut min = Vec3::splat(f32::INFINITY);
         let mut max = Vec3::splat(f32::NEG_INFINITY);
-        for p in &self.points {
-            let v = Vec3::from(*p);
+        for i in 0..n {
+            let v = Vec3::new(self.spheres.x[i], self.spheres.y[i], self.spheres.z[i]);
             min = min.min(v);
             max = max.max(v);
         }
@@ -120,13 +160,14 @@ impl Bounded for Pointcloud {
     }
 
     pub fn aabb(&self) -> Cuboid {
-        if self.points.is_empty() {
+        let n = self.point_count();
+        if n == 0 {
             return Cuboid::from_aabb(Vec3::ZERO, Vec3::ZERO);
         }
         let mut min = Vec3::splat(f32::INFINITY);
         let mut max = Vec3::splat(f32::NEG_INFINITY);
-        for p in &self.points {
-            let v = Vec3::from(*p);
+        for i in 0..n {
+            let v = Vec3::new(self.spheres.x[i], self.spheres.y[i], self.spheres.z[i]);
             min = min.min(v);
             max = max.max(v);
         }
@@ -138,79 +179,40 @@ impl Bounded for Pointcloud {
 // Sphere-CAPT: delegate to capt crate, SIMD batch for collides_many
 impl Collides<Sphere> for Pointcloud {
     #[inline]
-    fn collides(&self, sphere: &Sphere) -> bool {
+    fn test<const BROADPHASE: bool>(&self, sphere: &Sphere) -> bool {
         let center = match &self.inverse_transform {
             Some(inv) => inv.transform_point3(sphere.center),
             None => sphere.center,
         };
         self.tree.collides(&center.to_array(), sphere.radius)
     }
-
-    fn collides_many(&self, spheres: &[Sphere]) -> bool {
-        let chunks = spheres.chunks_exact(8);
-        let remainder = chunks.remainder();
-
-        for chunk in chunks {
-            let centers: [f32x8; 3] = match &self.inverse_transform {
-                Some(inv) => {
-                    let transformed: [Vec3; 8] =
-                        std::array::from_fn(|i| inv.transform_point3(chunk[i].center));
-                    [
-                        f32x8::new(std::array::from_fn(|i| transformed[i].x)),
-                        f32x8::new(std::array::from_fn(|i| transformed[i].y)),
-                        f32x8::new(std::array::from_fn(|i| transformed[i].z)),
-                    ]
-                }
-                None => [
-                    f32x8::new(std::array::from_fn(|i| chunk[i].center.x)),
-                    f32x8::new(std::array::from_fn(|i| chunk[i].center.y)),
-                    f32x8::new(std::array::from_fn(|i| chunk[i].center.z)),
-                ],
-            };
-            let radii = f32x8::new(std::array::from_fn(|i| chunk[i].radius));
-            if self.tree.collides_simd(&centers, radii) {
-                return true;
-            }
-        }
-
-        for sphere in remainder {
-            let center = match &self.inverse_transform {
-                Some(inv) => inv.transform_point3(sphere.center),
-                None => sphere.center,
-            };
-            if self.tree.collides(&center.to_array(), sphere.radius) {
-                return true;
-            }
-        }
-        false
-    }
 }
 
 impl Collides<Pointcloud> for Sphere {
     #[inline]
-    fn collides(&self, other: &Pointcloud) -> bool {
-        other.collides(self)
+    fn test<const BROADPHASE: bool>(&self, other: &Pointcloud) -> bool {
+        other.test::<BROADPHASE>(self)
     }
 }
 
 // Point-Pointcloud: a point is a zero-radius sphere
 impl Collides<crate::Point> for Pointcloud {
     #[inline]
-    fn collides(&self, point: &crate::Point) -> bool {
-        self.collides(&Sphere::new(point.0, 0.0))
+    fn test<const BROADPHASE: bool>(&self, point: &crate::Point) -> bool {
+        self.test::<BROADPHASE>(&Sphere::new(point.0, 0.0))
     }
 }
 
 impl Collides<Pointcloud> for crate::Point {
     #[inline]
-    fn collides(&self, other: &Pointcloud) -> bool {
-        other.collides(self)
+    fn test<const BROADPHASE: bool>(&self, other: &Pointcloud) -> bool {
+        other.test::<BROADPHASE>(self)
     }
 }
 
 // Capsule-CAPT: bounding sphere broadphase + SIMD raw point narrow-phase
 impl Collides<Capsule> for Pointcloud {
-    fn collides(&self, capsule: &Capsule) -> bool {
+    fn test<const BROADPHASE: bool>(&self, capsule: &Capsule) -> bool {
         let transformed;
         let capsule = if let Some(inv) = &self.inverse_transform {
             transformed = {
@@ -223,8 +225,10 @@ impl Collides<Capsule> for Pointcloud {
             capsule
         };
         let (bc, br) = capsule.bounding_sphere();
-        if !self.tree.collides(&bc.to_array(), br) {
-            return false;
+        if BROADPHASE {
+            if !self.tree.collides(&bc.to_array(), br) {
+                return false;
+            }
         }
 
         let r_total = capsule.radius + self.point_radius;
@@ -240,21 +244,12 @@ impl Collides<Capsule> for Pointcloud {
         let zero = f32x8::splat(0.0);
         let one = f32x8::splat(1.0);
 
-        let chunks = self.points.chunks_exact(8);
-        let remainder = chunks.remainder();
-
-        for chunk in chunks {
-            let mut px = [0.0f32; 8];
-            let mut py = [0.0f32; 8];
-            let mut pz = [0.0f32; 8];
-            for (i, pt) in chunk.iter().enumerate() {
-                px[i] = pt[0];
-                py[i] = pt[1];
-                pz[i] = pt[2];
-            }
-            let px = f32x8::new(px);
-            let py = f32x8::new(py);
-            let pz = f32x8::new(pz);
+        let full_chunks = self.full_chunks();
+        for i in 0..full_chunks {
+            let base = i * 8;
+            let px = f32x8::new(self.spheres.x[base..base + 8].try_into().unwrap());
+            let py = f32x8::new(self.spheres.y[base..base + 8].try_into().unwrap());
+            let pz = f32x8::new(self.spheres.z[base..base + 8].try_into().unwrap());
 
             // Project point onto capsule segment, clamp t
             let dfx = px - p1x;
@@ -280,8 +275,8 @@ impl Collides<Capsule> for Pointcloud {
 
         // Scalar remainder
         let r_total_sq_s = r_total * r_total;
-        for &pt in remainder {
-            let p = Vec3::from(pt);
+        for i in self.remainder_start()..self.point_count() {
+            let p = Vec3::new(self.spheres.x[i], self.spheres.y[i], self.spheres.z[i]);
             let closest = capsule.closest_point_to(p);
             let d = p - closest;
             if d.dot(d) <= r_total_sq_s {
@@ -294,14 +289,14 @@ impl Collides<Capsule> for Pointcloud {
 
 impl Collides<Pointcloud> for Capsule {
     #[inline]
-    fn collides(&self, other: &Pointcloud) -> bool {
-        other.collides(self)
+    fn test<const BROADPHASE: bool>(&self, other: &Pointcloud) -> bool {
+        other.test::<BROADPHASE>(self)
     }
 }
 
 // Cuboid-CAPT: bounding sphere broadphase + SIMD raw point narrow-phase
 impl Collides<Cuboid> for Pointcloud {
-    fn collides(&self, cuboid: &Cuboid) -> bool {
+    fn test<const BROADPHASE: bool>(&self, cuboid: &Cuboid) -> bool {
         let transformed;
         let cuboid = if let Some(inv) = &self.inverse_transform {
             transformed = {
@@ -314,8 +309,10 @@ impl Collides<Cuboid> for Pointcloud {
             cuboid
         };
         let br = cuboid.bounding_sphere_radius();
-        if !self.tree.collides(&cuboid.center.to_array(), br) {
-            return false;
+        if BROADPHASE {
+            if !self.tree.collides(&cuboid.center.to_array(), br) {
+                return false;
+            }
         }
 
         let r_sq = f32x8::splat(self.point_radius * self.point_radius);
@@ -347,21 +344,12 @@ impl Collides<Cuboid> for Pointcloud {
         let zero = f32x8::splat(0.0);
         let axes_comp = [ax, ay, az];
 
-        let chunks = self.points.chunks_exact(8);
-        let remainder = chunks.remainder();
-
-        for chunk in chunks {
-            let mut px = [0.0f32; 8];
-            let mut py = [0.0f32; 8];
-            let mut pz = [0.0f32; 8];
-            for (i, pt) in chunk.iter().enumerate() {
-                px[i] = pt[0];
-                py[i] = pt[1];
-                pz[i] = pt[2];
-            }
-            let dfx = f32x8::new(px) - ccx;
-            let dfy = f32x8::new(py) - ccy;
-            let dfz = f32x8::new(pz) - ccz;
+        let full_chunks = self.full_chunks();
+        for i in 0..full_chunks {
+            let base = i * 8;
+            let dfx = f32x8::new(self.spheres.x[base..base + 8].try_into().unwrap()) - ccx;
+            let dfy = f32x8::new(self.spheres.y[base..base + 8].try_into().unwrap()) - ccy;
+            let dfz = f32x8::new(self.spheres.z[base..base + 8].try_into().unwrap()) - ccz;
 
             let mut dist_sq = zero;
             for i in 0..3 {
@@ -378,8 +366,8 @@ impl Collides<Cuboid> for Pointcloud {
         }
 
         let r_sq_s = self.point_radius * self.point_radius;
-        for &pt in remainder {
-            let p = Vec3::from(pt);
+        for i in self.remainder_start()..self.point_count() {
+            let p = Vec3::new(self.spheres.x[i], self.spheres.y[i], self.spheres.z[i]);
             if cuboid.point_dist_sq(p) <= r_sq_s {
                 return true;
             }
@@ -390,8 +378,8 @@ impl Collides<Cuboid> for Pointcloud {
 
 impl Collides<Pointcloud> for Cuboid {
     #[inline]
-    fn collides(&self, other: &Pointcloud) -> bool {
-        other.collides(self)
+    fn test<const BROADPHASE: bool>(&self, other: &Pointcloud) -> bool {
+        other.test::<BROADPHASE>(self)
     }
 }
 
@@ -400,31 +388,24 @@ impl Pointcloud {
     /// SIMD narrowphase: test 8 cloud points at a time against all half-planes.
     /// A point is inside the polytope if `n·p - d - point_radius <= 0` for ALL planes.
     /// We track `max_sep` per point across planes; if any point's max_sep <= 0, it's inside.
-    fn collides_polytope_ref(&self, polytope: &RefConvexPolytope<'_>) -> bool {
+    fn collides_polytope_ref<const BROADPHASE: bool>(&self, polytope: &RefConvexPolytope<'_>) -> bool {
         // Broadphase: polytope OBB bounding sphere vs CAPT
-        let br = polytope.obb.bounding_sphere_radius();
-        if !self.tree.collides(&polytope.obb.center.to_array(), br) {
-            return false;
+        if BROADPHASE {
+            let br = polytope.obb.bounding_sphere_radius();
+            if !self.tree.collides(&polytope.obb.center.to_array(), br) {
+                return false;
+            }
         }
 
         let r = f32x8::splat(self.point_radius);
         let zero = f32x8::ZERO;
 
-        let chunks = self.points.chunks_exact(8);
-        let remainder = chunks.remainder();
-
-        for chunk in chunks {
-            let mut px = [0.0f32; 8];
-            let mut py = [0.0f32; 8];
-            let mut pz = [0.0f32; 8];
-            for (i, pt) in chunk.iter().enumerate() {
-                px[i] = pt[0];
-                py[i] = pt[1];
-                pz[i] = pt[2];
-            }
-            let px = f32x8::new(px);
-            let py = f32x8::new(py);
-            let pz = f32x8::new(pz);
+        let full_chunks = self.full_chunks();
+        for i in 0..full_chunks {
+            let base = i * 8;
+            let px = f32x8::new(self.spheres.x[base..base + 8].try_into().unwrap());
+            let py = f32x8::new(self.spheres.y[base..base + 8].try_into().unwrap());
+            let pz = f32x8::new(self.spheres.z[base..base + 8].try_into().unwrap());
 
             // For each point, track max separation across all planes.
             // A point is inside iff max_sep <= 0.
@@ -445,8 +426,8 @@ impl Pointcloud {
 
         // Scalar remainder
         let r_s = self.point_radius;
-        for &pt in remainder {
-            let p = Vec3::from(pt);
+        for i in self.remainder_start()..self.point_count() {
+            let p = Vec3::new(self.spheres.x[i], self.spheres.y[i], self.spheres.z[i]);
             let mut inside = true;
             for &(normal, d) in polytope.planes {
                 if normal.dot(p) - d - r_s > 0.0 {
@@ -464,46 +445,46 @@ impl Pointcloud {
 
 impl Collides<ConvexPolytope> for Pointcloud {
     #[inline]
-    fn collides(&self, polytope: &ConvexPolytope) -> bool {
+    fn test<const BROADPHASE: bool>(&self, polytope: &ConvexPolytope) -> bool {
         if let Some(inv) = &self.inverse_transform {
             let mut p = polytope.clone();
             p.transform(*inv);
-            return self.collides_polytope_ref(&RefConvexPolytope::from_heap(&p));
+            return self.collides_polytope_ref::<BROADPHASE>(&RefConvexPolytope::from_heap(&p));
         }
-        self.collides_polytope_ref(&RefConvexPolytope::from_heap(polytope))
+        self.collides_polytope_ref::<BROADPHASE>(&RefConvexPolytope::from_heap(polytope))
     }
 }
 
 impl Collides<Pointcloud> for ConvexPolytope {
     #[inline]
-    fn collides(&self, other: &Pointcloud) -> bool {
-        other.collides(self)
+    fn test<const BROADPHASE: bool>(&self, other: &Pointcloud) -> bool {
+        other.test::<BROADPHASE>(self)
     }
 }
 
 impl<const P: usize, const V: usize> Collides<ArrayConvexPolytope<P, V>> for Pointcloud {
     #[inline]
-    fn collides(&self, polytope: &ArrayConvexPolytope<P, V>) -> bool {
+    fn test<const BROADPHASE: bool>(&self, polytope: &ArrayConvexPolytope<P, V>) -> bool {
         if let Some(inv) = &self.inverse_transform {
             let mut p = *polytope;
             p.transform(*inv);
-            return self.collides_polytope_ref(&RefConvexPolytope::from_array(&p));
+            return self.collides_polytope_ref::<BROADPHASE>(&RefConvexPolytope::from_array(&p));
         }
-        self.collides_polytope_ref(&RefConvexPolytope::from_array(polytope))
+        self.collides_polytope_ref::<BROADPHASE>(&RefConvexPolytope::from_array(polytope))
     }
 }
 
 impl<const P: usize, const V: usize> Collides<Pointcloud> for ArrayConvexPolytope<P, V> {
     #[inline]
-    fn collides(&self, other: &Pointcloud) -> bool {
-        other.collides(self)
+    fn test<const BROADPHASE: bool>(&self, other: &Pointcloud) -> bool {
+        other.test::<BROADPHASE>(self)
     }
 }
 
 // Plane-Pointcloud: each point (with point_radius) acts as a sphere against the plane.
 // SIMD: test 8 points at a time against the half-space n·p <= d + point_radius.
 impl Collides<Plane> for Pointcloud {
-    fn collides(&self, plane: &Plane) -> bool {
+    fn test<const BROADPHASE: bool>(&self, plane: &Plane) -> bool {
         let (normal, d) = match &self.inverse_transform {
             Some(inv) => {
                 let n = inv.matrix3 * plane.normal;
@@ -518,27 +499,20 @@ impl Collides<Plane> for Pointcloud {
         let nz = f32x8::splat(normal.z);
         let threshold = f32x8::splat(d + self.point_radius);
 
-        let chunks = self.points.chunks_exact(8);
-        let remainder = chunks.remainder();
-
-        for chunk in chunks {
-            let mut px = [0.0f32; 8];
-            let mut py = [0.0f32; 8];
-            let mut pz = [0.0f32; 8];
-            for (i, pt) in chunk.iter().enumerate() {
-                px[i] = pt[0];
-                py[i] = pt[1];
-                pz[i] = pt[2];
-            }
-            let proj = nx * f32x8::new(px) + ny * f32x8::new(py) + nz * f32x8::new(pz);
+        let full_chunks = self.full_chunks();
+        for i in 0..full_chunks {
+            let base = i * 8;
+            let proj = nx * f32x8::new(self.spheres.x[base..base + 8].try_into().unwrap())
+                + ny * f32x8::new(self.spheres.y[base..base + 8].try_into().unwrap())
+                + nz * f32x8::new(self.spheres.z[base..base + 8].try_into().unwrap());
             if proj.simd_le(threshold).any() {
                 return true;
             }
         }
 
         let threshold_s = d + self.point_radius;
-        for &pt in remainder {
-            let p = Vec3::from(pt);
+        for i in self.remainder_start()..self.point_count() {
+            let p = Vec3::new(self.spheres.x[i], self.spheres.y[i], self.spheres.z[i]);
             if normal.dot(p) <= threshold_s {
                 return true;
             }
@@ -549,14 +523,14 @@ impl Collides<Plane> for Pointcloud {
 
 impl Collides<Pointcloud> for Plane {
     #[inline]
-    fn collides(&self, other: &Pointcloud) -> bool {
-        other.collides(self)
+    fn test<const BROADPHASE: bool>(&self, other: &Pointcloud) -> bool {
+        other.test::<BROADPHASE>(self)
     }
 }
 
 // ConvexPolygon-Pointcloud: point-polygon distance for each point (with point_radius).
 impl Collides<ConvexPolygon> for Pointcloud {
-    fn collides(&self, polygon: &ConvexPolygon) -> bool {
+    fn test<const BROADPHASE: bool>(&self, polygon: &ConvexPolygon) -> bool {
         let polygon = if let Some(inv) = &self.inverse_transform {
             let mut p = polygon.clone();
             p.transform(*inv);
@@ -566,8 +540,8 @@ impl Collides<ConvexPolygon> for Pointcloud {
         };
 
         let r_sq = self.point_radius * self.point_radius;
-        for &pt in &self.points {
-            let p = Vec3::from(pt);
+        for i in 0..self.point_count() {
+            let p = Vec3::new(self.spheres.x[i], self.spheres.y[i], self.spheres.z[i]);
             if polygon.point_dist_sq(p) <= r_sq {
                 return true;
             }
@@ -578,8 +552,8 @@ impl Collides<ConvexPolygon> for Pointcloud {
 
 impl Collides<Pointcloud> for ConvexPolygon {
     #[inline]
-    fn collides(&self, other: &Pointcloud) -> bool {
-        other.collides(self)
+    fn test<const BROADPHASE: bool>(&self, other: &Pointcloud) -> bool {
+        other.test::<BROADPHASE>(self)
     }
 }
 
@@ -588,7 +562,7 @@ impl Collides<Pointcloud> for ConvexPolygon {
 macro_rules! impl_line_pcl {
     ($LineType:ty, $t_min:expr, $t_max:expr) => {
         impl Collides<$LineType> for Pointcloud {
-            fn collides(&self, line: &$LineType) -> bool {
+            fn test<const BROADPHASE: bool>(&self, line: &$LineType) -> bool {
                 let (origin, dir, rdv) = match &self.inverse_transform {
                     Some(inv) => {
                         let o = inv.transform_point3(line.origin_());
@@ -606,8 +580,8 @@ macro_rules! impl_line_pcl {
 
                 let r = self.point_radius;
                 let r_sq = r * r;
-                for &pt in &self.points {
-                    let p = Vec3::from(pt);
+                for i in 0..self.point_count() {
+                    let p = Vec3::new(self.spheres.x[i], self.spheres.y[i], self.spheres.z[i]);
                     let t = crate::line::closest_t_to_point(origin, dir, rdv, p, $t_min, $t_max);
                     let closest = origin + dir * t;
                     let d = p - closest;
@@ -621,8 +595,8 @@ macro_rules! impl_line_pcl {
 
         impl Collides<Pointcloud> for $LineType {
             #[inline]
-            fn collides(&self, other: &Pointcloud) -> bool {
-                other.collides(self)
+            fn test<const BROADPHASE: bool>(&self, other: &Pointcloud) -> bool {
+                other.test::<BROADPHASE>(self)
             }
         }
     };

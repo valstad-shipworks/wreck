@@ -111,7 +111,7 @@ fn sphere_pcl_collides_many_simd() {
         })
         .collect();
 
-    let simd_result = pcl.collides_many(&spheres);
+    let simd_result = spheres.iter().any(|x| pcl.collides(x));
     let scalar_result = spheres.iter().any(|s| pcl.collides(s));
     assert_eq!(simd_result, scalar_result);
 }

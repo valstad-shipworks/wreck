@@ -122,22 +122,15 @@ impl Stretchable for Ray {
 
 impl Collides<Sphere> for Ray {
     #[inline]
-    fn collides(&self, sphere: &Sphere) -> bool {
+    fn test<const BROADPHASE: bool>(&self, sphere: &Sphere) -> bool {
         super::line_sphere_collides(self.origin, self.dir, self.rdv, sphere, T_MIN, T_MAX)
-    }
-
-    fn collides_many(&self, others: &[Sphere]) -> bool {
-        super::simd_collides_many_spheres(
-            self.origin, self.dir, self.rdv, T_MIN, T_MAX, others,
-            |s| self.collides(s),
-        )
     }
 }
 
 impl Collides<Ray> for Sphere {
     #[inline]
-    fn collides(&self, ray: &Ray) -> bool {
-        ray.collides(self)
+    fn test<const BROADPHASE: bool>(&self, ray: &Ray) -> bool {
+        ray.test::<BROADPHASE>(self)
     }
 }
 
@@ -145,15 +138,15 @@ impl Collides<Ray> for Sphere {
 
 impl Collides<Capsule> for Ray {
     #[inline]
-    fn collides(&self, capsule: &Capsule) -> bool {
+    fn test<const BROADPHASE: bool>(&self, capsule: &Capsule) -> bool {
         super::line_capsule_collides(self.origin, self.dir, capsule, T_MIN, T_MAX)
     }
 }
 
 impl Collides<Ray> for Capsule {
     #[inline]
-    fn collides(&self, ray: &Ray) -> bool {
-        ray.collides(self)
+    fn test<const BROADPHASE: bool>(&self, ray: &Ray) -> bool {
+        ray.test::<BROADPHASE>(self)
     }
 }
 
@@ -161,15 +154,15 @@ impl Collides<Ray> for Capsule {
 
 impl Collides<Cuboid> for Ray {
     #[inline]
-    fn collides(&self, cuboid: &Cuboid) -> bool {
+    fn test<const BROADPHASE: bool>(&self, cuboid: &Cuboid) -> bool {
         super::line_cuboid_collides(self.origin, self.dir, cuboid, T_MIN, T_MAX)
     }
 }
 
 impl Collides<Ray> for Cuboid {
     #[inline]
-    fn collides(&self, ray: &Ray) -> bool {
-        ray.collides(self)
+    fn test<const BROADPHASE: bool>(&self, ray: &Ray) -> bool {
+        ray.test::<BROADPHASE>(self)
     }
 }
 
@@ -177,7 +170,7 @@ impl Collides<Ray> for Cuboid {
 
 impl Collides<ConvexPolytope> for Ray {
     #[inline]
-    fn collides(&self, polytope: &ConvexPolytope) -> bool {
+    fn test<const BROADPHASE: bool>(&self, polytope: &ConvexPolytope) -> bool {
         super::line_polytope_collides(
             self.origin, self.dir,
             &polytope.planes, &polytope.obb,
@@ -188,14 +181,14 @@ impl Collides<ConvexPolytope> for Ray {
 
 impl Collides<Ray> for ConvexPolytope {
     #[inline]
-    fn collides(&self, ray: &Ray) -> bool {
-        ray.collides(self)
+    fn test<const BROADPHASE: bool>(&self, ray: &Ray) -> bool {
+        ray.test::<BROADPHASE>(self)
     }
 }
 
 impl<const P: usize, const V: usize> Collides<ArrayConvexPolytope<P, V>> for Ray {
     #[inline]
-    fn collides(&self, polytope: &ArrayConvexPolytope<P, V>) -> bool {
+    fn test<const BROADPHASE: bool>(&self, polytope: &ArrayConvexPolytope<P, V>) -> bool {
         super::line_polytope_collides(
             self.origin, self.dir,
             &polytope.planes, &polytope.obb,
@@ -206,8 +199,8 @@ impl<const P: usize, const V: usize> Collides<ArrayConvexPolytope<P, V>> for Ray
 
 impl<const P: usize, const V: usize> Collides<Ray> for ArrayConvexPolytope<P, V> {
     #[inline]
-    fn collides(&self, ray: &Ray) -> bool {
-        ray.collides(self)
+    fn test<const BROADPHASE: bool>(&self, ray: &Ray) -> bool {
+        ray.test::<BROADPHASE>(self)
     }
 }
 
@@ -215,15 +208,15 @@ impl<const P: usize, const V: usize> Collides<Ray> for ArrayConvexPolytope<P, V>
 
 impl Collides<Plane> for Ray {
     #[inline]
-    fn collides(&self, plane: &Plane) -> bool {
+    fn test<const BROADPHASE: bool>(&self, plane: &Plane) -> bool {
         super::line_infinite_plane_collides(self.origin, self.dir, plane, T_MIN, T_MAX)
     }
 }
 
 impl Collides<Ray> for Plane {
     #[inline]
-    fn collides(&self, ray: &Ray) -> bool {
-        ray.collides(self)
+    fn test<const BROADPHASE: bool>(&self, ray: &Ray) -> bool {
+        ray.test::<BROADPHASE>(self)
     }
 }
 
@@ -231,15 +224,15 @@ impl Collides<Ray> for Plane {
 
 impl Collides<ConvexPolygon> for Ray {
     #[inline]
-    fn collides(&self, polygon: &ConvexPolygon) -> bool {
+    fn test<const BROADPHASE: bool>(&self, polygon: &ConvexPolygon) -> bool {
         polygon.parametric_line_dist_sq(self.origin, self.dir, T_MIN, T_MAX) <= 0.0
     }
 }
 
 impl Collides<Ray> for ConvexPolygon {
     #[inline]
-    fn collides(&self, ray: &Ray) -> bool {
-        ray.collides(self)
+    fn test<const BROADPHASE: bool>(&self, ray: &Ray) -> bool {
+        ray.test::<BROADPHASE>(self)
     }
 }
 

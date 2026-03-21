@@ -112,29 +112,29 @@ impl<const P: usize, const V: usize> Transformable for ArrayConvexPolytope<P, V>
 
 impl<const P: usize, const V: usize> Collides<ArrayConvexPolytope<P, V>> for Sphere {
     #[inline]
-    fn collides(&self, other: &ArrayConvexPolytope<P, V>) -> bool {
-        other.as_ref().collides_sphere(self)
+    fn test<const BROADPHASE: bool>(&self, other: &ArrayConvexPolytope<P, V>) -> bool {
+        other.as_ref().collides_sphere::<BROADPHASE>(self)
     }
 }
 
 impl<const P: usize, const V: usize> Collides<Sphere> for ArrayConvexPolytope<P, V> {
     #[inline]
-    fn collides(&self, other: &Sphere) -> bool {
-        self.as_ref().collides_sphere(other)
+    fn test<const BROADPHASE: bool>(&self, other: &Sphere) -> bool {
+        self.as_ref().collides_sphere::<BROADPHASE>(other)
     }
 }
 
 impl<const P: usize, const V: usize> Collides<ArrayConvexPolytope<P, V>> for Cuboid {
     #[inline]
-    fn collides(&self, other: &ArrayConvexPolytope<P, V>) -> bool {
-        other.as_ref().collides_cuboid(self)
+    fn test<const BROADPHASE: bool>(&self, other: &ArrayConvexPolytope<P, V>) -> bool {
+        other.as_ref().collides_cuboid::<BROADPHASE>(self)
     }
 }
 
 impl<const P: usize, const V: usize> Collides<Cuboid> for ArrayConvexPolytope<P, V> {
     #[inline]
-    fn collides(&self, other: &Cuboid) -> bool {
-        self.as_ref().collides_cuboid(other)
+    fn test<const BROADPHASE: bool>(&self, other: &Cuboid) -> bool {
+        self.as_ref().collides_cuboid::<BROADPHASE>(other)
     }
 }
 
@@ -142,8 +142,8 @@ impl<const P: usize, const V: usize> Collides<ArrayConvexPolytope<P, V>>
     for crate::capsule::Capsule
 {
     #[inline]
-    fn collides(&self, other: &ArrayConvexPolytope<P, V>) -> bool {
-        other.as_ref().collides_capsule(self)
+    fn test<const BROADPHASE: bool>(&self, other: &ArrayConvexPolytope<P, V>) -> bool {
+        other.as_ref().collides_capsule::<BROADPHASE>(self)
     }
 }
 
@@ -151,8 +151,8 @@ impl<const P: usize, const V: usize> Collides<crate::capsule::Capsule>
     for ArrayConvexPolytope<P, V>
 {
     #[inline]
-    fn collides(&self, other: &crate::capsule::Capsule) -> bool {
-        self.as_ref().collides_capsule(other)
+    fn test<const BROADPHASE: bool>(&self, other: &crate::capsule::Capsule) -> bool {
+        self.as_ref().collides_capsule::<BROADPHASE>(other)
     }
 }
 
@@ -164,8 +164,8 @@ impl<const P: usize, const V: usize, const P2: usize, const V2: usize>
     Collides<ArrayConvexPolytope<P2, V2>> for ArrayConvexPolytope<P, V>
 {
     #[inline]
-    fn collides(&self, other: &ArrayConvexPolytope<P2, V2>) -> bool {
-        self.as_ref().collides_polytope(&other.as_ref())
+    fn test<const BROADPHASE: bool>(&self, other: &ArrayConvexPolytope<P2, V2>) -> bool {
+        self.as_ref().collides_polytope::<BROADPHASE>(&other.as_ref())
     }
 }
 

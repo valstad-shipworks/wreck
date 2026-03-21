@@ -162,22 +162,15 @@ fn segment_sphere_collides(seg: &LineSegment, sphere: &Sphere) -> bool {
 
 impl Collides<Sphere> for LineSegment {
     #[inline]
-    fn collides(&self, sphere: &Sphere) -> bool {
+    fn test<const BROADPHASE: bool>(&self, sphere: &Sphere) -> bool {
         segment_sphere_collides(self, sphere)
-    }
-
-    fn collides_many(&self, others: &[Sphere]) -> bool {
-        super::simd_collides_many_spheres(
-            self.p1, self.dir, self.rdv, T_MIN, T_MAX, others,
-            |s| segment_sphere_collides(self, s),
-        )
     }
 }
 
 impl Collides<LineSegment> for Sphere {
     #[inline]
-    fn collides(&self, seg: &LineSegment) -> bool {
-        seg.collides(self)
+    fn test<const BROADPHASE: bool>(&self, seg: &LineSegment) -> bool {
+        seg.test::<BROADPHASE>(self)
     }
 }
 
@@ -185,24 +178,15 @@ impl Collides<LineSegment> for Sphere {
 
 impl Collides<Capsule> for LineSegment {
     #[inline]
-    fn collides(&self, capsule: &Capsule) -> bool {
+    fn test<const BROADPHASE: bool>(&self, capsule: &Capsule) -> bool {
         super::line_capsule_collides(self.p1, self.dir, capsule, T_MIN, T_MAX)
-    }
-
-    fn collides_many(&self, others: &[Capsule]) -> bool {
-        let (sc, sr) = self.bounding_sphere();
-        crate::broadphase_collides_many(
-            sc, sr, others,
-            |c| c.bounding_sphere(),
-            |c| self.collides(c),
-        )
     }
 }
 
 impl Collides<LineSegment> for Capsule {
     #[inline]
-    fn collides(&self, seg: &LineSegment) -> bool {
-        seg.collides(self)
+    fn test<const BROADPHASE: bool>(&self, seg: &LineSegment) -> bool {
+        seg.test::<BROADPHASE>(self)
     }
 }
 
@@ -210,24 +194,15 @@ impl Collides<LineSegment> for Capsule {
 
 impl Collides<Cuboid> for LineSegment {
     #[inline]
-    fn collides(&self, cuboid: &Cuboid) -> bool {
+    fn test<const BROADPHASE: bool>(&self, cuboid: &Cuboid) -> bool {
         super::line_cuboid_collides(self.p1, self.dir, cuboid, T_MIN, T_MAX)
-    }
-
-    fn collides_many(&self, others: &[Cuboid]) -> bool {
-        let (sc, sr) = self.bounding_sphere();
-        crate::broadphase_collides_many(
-            sc, sr, others,
-            |c| (c.center, c.bounding_sphere_radius()),
-            |c| self.collides(c),
-        )
     }
 }
 
 impl Collides<LineSegment> for Cuboid {
     #[inline]
-    fn collides(&self, seg: &LineSegment) -> bool {
-        seg.collides(self)
+    fn test<const BROADPHASE: bool>(&self, seg: &LineSegment) -> bool {
+        seg.test::<BROADPHASE>(self)
     }
 }
 
@@ -235,34 +210,25 @@ impl Collides<LineSegment> for Cuboid {
 
 impl Collides<ConvexPolytope> for LineSegment {
     #[inline]
-    fn collides(&self, polytope: &ConvexPolytope) -> bool {
+    fn test<const BROADPHASE: bool>(&self, polytope: &ConvexPolytope) -> bool {
         super::line_polytope_collides(
             self.p1, self.dir,
             &polytope.planes, &polytope.obb,
             T_MIN, T_MAX,
         )
     }
-
-    fn collides_many(&self, others: &[ConvexPolytope]) -> bool {
-        let (sc, sr) = self.bounding_sphere();
-        crate::broadphase_collides_many(
-            sc, sr, others,
-            |p| (p.obb.center, p.obb.bounding_sphere_radius()),
-            |p| self.collides(p),
-        )
-    }
 }
 
 impl Collides<LineSegment> for ConvexPolytope {
     #[inline]
-    fn collides(&self, seg: &LineSegment) -> bool {
-        seg.collides(self)
+    fn test<const BROADPHASE: bool>(&self, seg: &LineSegment) -> bool {
+        seg.test::<BROADPHASE>(self)
     }
 }
 
 impl<const P: usize, const V: usize> Collides<ArrayConvexPolytope<P, V>> for LineSegment {
     #[inline]
-    fn collides(&self, polytope: &ArrayConvexPolytope<P, V>) -> bool {
+    fn test<const BROADPHASE: bool>(&self, polytope: &ArrayConvexPolytope<P, V>) -> bool {
         super::line_polytope_collides(
             self.p1, self.dir,
             &polytope.planes, &polytope.obb,
@@ -273,8 +239,8 @@ impl<const P: usize, const V: usize> Collides<ArrayConvexPolytope<P, V>> for Lin
 
 impl<const P: usize, const V: usize> Collides<LineSegment> for ArrayConvexPolytope<P, V> {
     #[inline]
-    fn collides(&self, seg: &LineSegment) -> bool {
-        seg.collides(self)
+    fn test<const BROADPHASE: bool>(&self, seg: &LineSegment) -> bool {
+        seg.test::<BROADPHASE>(self)
     }
 }
 
@@ -282,15 +248,15 @@ impl<const P: usize, const V: usize> Collides<LineSegment> for ArrayConvexPolyto
 
 impl Collides<Plane> for LineSegment {
     #[inline]
-    fn collides(&self, plane: &Plane) -> bool {
+    fn test<const BROADPHASE: bool>(&self, plane: &Plane) -> bool {
         super::line_infinite_plane_collides(self.p1, self.dir, plane, T_MIN, T_MAX)
     }
 }
 
 impl Collides<LineSegment> for Plane {
     #[inline]
-    fn collides(&self, seg: &LineSegment) -> bool {
-        seg.collides(self)
+    fn test<const BROADPHASE: bool>(&self, seg: &LineSegment) -> bool {
+        seg.test::<BROADPHASE>(self)
     }
 }
 
@@ -298,15 +264,15 @@ impl Collides<LineSegment> for Plane {
 
 impl Collides<ConvexPolygon> for LineSegment {
     #[inline]
-    fn collides(&self, polygon: &ConvexPolygon) -> bool {
+    fn test<const BROADPHASE: bool>(&self, polygon: &ConvexPolygon) -> bool {
         polygon.parametric_line_dist_sq(self.p1, self.dir, T_MIN, T_MAX) <= 0.0
     }
 }
 
 impl Collides<LineSegment> for ConvexPolygon {
     #[inline]
-    fn collides(&self, seg: &LineSegment) -> bool {
-        seg.collides(self)
+    fn test<const BROADPHASE: bool>(&self, seg: &LineSegment) -> bool {
+        seg.test::<BROADPHASE>(self)
     }
 }
 

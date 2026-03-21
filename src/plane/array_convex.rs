@@ -236,24 +236,14 @@ impl<const V: usize> Stretchable for ArrayConvexPolygon<V> {
 
 impl<const V: usize> Collides<Sphere> for ArrayConvexPolygon<V> {
     #[inline]
-    fn collides(&self, sphere: &Sphere) -> bool {
+    fn test<const BROADPHASE: bool>(&self, sphere: &Sphere) -> bool {
         ref_polygon_sphere_collides(&self.as_ref(), sphere)
-    }
-
-    fn collides_many(&self, others: &[Sphere]) -> bool {
-        crate::broadphase_collides_many(
-            self.center,
-            self.bounding_radius,
-            others,
-            |s| (s.center, s.radius),
-            |s| ref_polygon_sphere_collides(&self.as_ref(), s),
-        )
     }
 }
 
 impl<const V: usize> Collides<ArrayConvexPolygon<V>> for Sphere {
     #[inline]
-    fn collides(&self, polygon: &ArrayConvexPolygon<V>) -> bool {
+    fn test<const BROADPHASE: bool>(&self, polygon: &ArrayConvexPolygon<V>) -> bool {
         ref_polygon_sphere_collides(&polygon.as_ref(), self)
     }
 }
@@ -264,24 +254,14 @@ impl<const V: usize> Collides<ArrayConvexPolygon<V>> for Sphere {
 
 impl<const V: usize> Collides<Capsule> for ArrayConvexPolygon<V> {
     #[inline]
-    fn collides(&self, capsule: &Capsule) -> bool {
+    fn test<const BROADPHASE: bool>(&self, capsule: &Capsule) -> bool {
         ref_polygon_capsule_collides(&self.as_ref(), capsule)
-    }
-
-    fn collides_many(&self, others: &[Capsule]) -> bool {
-        crate::broadphase_collides_many(
-            self.center,
-            self.bounding_radius,
-            others,
-            |c| c.bounding_sphere(),
-            |c| ref_polygon_capsule_collides(&self.as_ref(), c),
-        )
     }
 }
 
 impl<const V: usize> Collides<ArrayConvexPolygon<V>> for Capsule {
     #[inline]
-    fn collides(&self, polygon: &ArrayConvexPolygon<V>) -> bool {
+    fn test<const BROADPHASE: bool>(&self, polygon: &ArrayConvexPolygon<V>) -> bool {
         ref_polygon_capsule_collides(&polygon.as_ref(), self)
     }
 }
@@ -292,24 +272,14 @@ impl<const V: usize> Collides<ArrayConvexPolygon<V>> for Capsule {
 
 impl<const V: usize> Collides<Cuboid> for ArrayConvexPolygon<V> {
     #[inline]
-    fn collides(&self, cuboid: &Cuboid) -> bool {
+    fn test<const BROADPHASE: bool>(&self, cuboid: &Cuboid) -> bool {
         ref_polygon_cuboid_collides(&self.as_ref(), cuboid)
-    }
-
-    fn collides_many(&self, others: &[Cuboid]) -> bool {
-        crate::broadphase_collides_many(
-            self.center,
-            self.bounding_radius,
-            others,
-            |c| (c.center, c.bounding_sphere_radius()),
-            |c| ref_polygon_cuboid_collides(&self.as_ref(), c),
-        )
     }
 }
 
 impl<const V: usize> Collides<ArrayConvexPolygon<V>> for Cuboid {
     #[inline]
-    fn collides(&self, polygon: &ArrayConvexPolygon<V>) -> bool {
+    fn test<const BROADPHASE: bool>(&self, polygon: &ArrayConvexPolygon<V>) -> bool {
         ref_polygon_cuboid_collides(&polygon.as_ref(), self)
     }
 }
@@ -320,7 +290,7 @@ impl<const V: usize> Collides<ArrayConvexPolygon<V>> for Cuboid {
 
 impl<const V: usize> Collides<ConvexPolytope> for ArrayConvexPolygon<V> {
     #[inline]
-    fn collides(&self, polytope: &ConvexPolytope) -> bool {
+    fn test<const BROADPHASE: bool>(&self, polytope: &ConvexPolytope) -> bool {
         ref_polygon_polytope_collides(
             &self.as_ref(),
             &polytope.planes,
@@ -332,7 +302,7 @@ impl<const V: usize> Collides<ConvexPolytope> for ArrayConvexPolygon<V> {
 
 impl<const V: usize> Collides<ArrayConvexPolygon<V>> for ConvexPolytope {
     #[inline]
-    fn collides(&self, polygon: &ArrayConvexPolygon<V>) -> bool {
+    fn test<const BROADPHASE: bool>(&self, polygon: &ArrayConvexPolygon<V>) -> bool {
         ref_polygon_polytope_collides(&polygon.as_ref(), &self.planes, &self.vertices, &self.obb)
     }
 }
@@ -341,7 +311,7 @@ impl<const V: usize, const P: usize, const PV: usize> Collides<ArrayConvexPolyto
     for ArrayConvexPolygon<V>
 {
     #[inline]
-    fn collides(&self, polytope: &ArrayConvexPolytope<P, PV>) -> bool {
+    fn test<const BROADPHASE: bool>(&self, polytope: &ArrayConvexPolytope<P, PV>) -> bool {
         ref_polygon_polytope_collides(
             &self.as_ref(),
             &polytope.planes,
@@ -355,7 +325,7 @@ impl<const V: usize, const P: usize, const PV: usize> Collides<ArrayConvexPolygo
     for ArrayConvexPolytope<P, PV>
 {
     #[inline]
-    fn collides(&self, polygon: &ArrayConvexPolygon<V>) -> bool {
+    fn test<const BROADPHASE: bool>(&self, polygon: &ArrayConvexPolygon<V>) -> bool {
         ref_polygon_polytope_collides(&polygon.as_ref(), &self.planes, &self.vertices, &self.obb)
     }
 }
@@ -366,14 +336,14 @@ impl<const V: usize, const P: usize, const PV: usize> Collides<ArrayConvexPolygo
 
 impl<const V: usize> Collides<Plane> for ArrayConvexPolygon<V> {
     #[inline]
-    fn collides(&self, plane: &Plane) -> bool {
+    fn test<const BROADPHASE: bool>(&self, plane: &Plane) -> bool {
         ref_polygon_infinite_plane_collides(&self.as_ref(), plane)
     }
 }
 
 impl<const V: usize> Collides<ArrayConvexPolygon<V>> for Plane {
     #[inline]
-    fn collides(&self, polygon: &ArrayConvexPolygon<V>) -> bool {
+    fn test<const BROADPHASE: bool>(&self, polygon: &ArrayConvexPolygon<V>) -> bool {
         ref_polygon_infinite_plane_collides(&polygon.as_ref(), self)
     }
 }
@@ -384,14 +354,14 @@ impl<const V: usize> Collides<ArrayConvexPolygon<V>> for Plane {
 
 impl<const V: usize> Collides<ConvexPolygon> for ArrayConvexPolygon<V> {
     #[inline]
-    fn collides(&self, other: &ConvexPolygon) -> bool {
+    fn test<const BROADPHASE: bool>(&self, other: &ConvexPolygon) -> bool {
         ref_polygon_polygon_collides(&self.as_ref(), &other.as_ref())
     }
 }
 
 impl<const V: usize> Collides<ArrayConvexPolygon<V>> for ConvexPolygon {
     #[inline]
-    fn collides(&self, other: &ArrayConvexPolygon<V>) -> bool {
+    fn test<const BROADPHASE: bool>(&self, other: &ArrayConvexPolygon<V>) -> bool {
         ref_polygon_polygon_collides(&self.as_ref(), &other.as_ref())
     }
 }
@@ -401,7 +371,7 @@ impl<const V: usize> Collides<ArrayConvexPolygon<V>> for ConvexPolygon {
 // ---------------------------------------------------------------------------
 
 impl<const V1: usize, const V2: usize> Collides<ArrayConvexPolygon<V2>> for ArrayConvexPolygon<V1> {
-    fn collides(&self, other: &ArrayConvexPolygon<V2>) -> bool {
+    fn test<const BROADPHASE: bool>(&self, other: &ArrayConvexPolygon<V2>) -> bool {
         ref_polygon_polygon_collides(&self.as_ref(), &other.as_ref())
     }
 }

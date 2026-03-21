@@ -221,7 +221,7 @@ fn plane_collides_many_spheres() {
         })
         .collect();
 
-    let simd_result = plane.collides_many(&spheres);
+    let simd_result = spheres.iter().any(|x| plane.collides(x));
     let scalar_result = spheres.iter().any(|s| plane.collides(s));
     assert_eq!(simd_result, scalar_result);
 }
@@ -240,7 +240,7 @@ fn plane_collides_many_capsules() {
         })
         .collect();
 
-    let simd_result = plane.collides_many(&capsules);
+    let simd_result = capsules.iter().any(|x| plane.collides(x));
     let scalar_result = capsules.iter().any(|c| plane.collides(c));
     assert_eq!(simd_result, scalar_result);
 }
@@ -259,7 +259,7 @@ fn plane_collides_many_cuboids() {
         })
         .collect();
 
-    let simd_result = plane.collides_many(&cuboids);
+    let simd_result = cuboids.iter().any(|x| plane.collides(x));
     let scalar_result = cuboids.iter().any(|c| plane.collides(c));
     assert_eq!(simd_result, scalar_result);
 }

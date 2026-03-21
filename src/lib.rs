@@ -11,6 +11,8 @@ pub(crate) mod pointcloud;
 mod util;
 pub(crate) use util::*;
 
+pub mod soa;
+
 pub use capsule::Capsule;
 pub use convex_polytope::array::ArrayConvexPolytope;
 pub use convex_polytope::heap::ConvexPolytope;
@@ -132,8 +134,10 @@ pub trait Transformable: Sized + Clone {
 pub trait Stretchable: Sized + Clone {
     type Output;
 
+    #[must_use]
     fn stretch(&self, translation: glam::Vec3) -> Self::Output;
     #[inline]
+    #[must_use]
     fn stretch_d(&self, translation: glam::DVec3) -> Self::Output {
         self.stretch(translation.as_vec3())
     }
@@ -143,21 +147,33 @@ pub trait Collides<T>: Sized + Clone
 where
     T: Sized + Clone,
 {
-    fn collides(&self, other: &T) -> bool;
-    fn collides_many(&self, others: &[T]) -> bool {
-        others.iter().any(|other| self.collides(other))
+    /// Collision test with compile-time control over broadphase.
+    /// When `BROADPHASE` is true, broadphase checks run before narrowphase.
+    /// When false, only the narrowphase runs.
+    #[must_use]
+    #[doc(hidden)]
+    fn test<const BROADPHASE: bool>(&self, other: &T) -> bool;
+
+    /// Collision test (broadphase + narrowphase).
+    #[must_use]
+    fn collides(&self, other: &T) -> bool {
+        self.test::<true>(other)
     }
 }
 
 pub trait Bounded: Sized + Clone {
+    #[must_use]
     fn broadphase(&self) -> Sphere;
+    #[must_use]
     fn obb(&self) -> Cuboid;
+    #[must_use]
     fn aabb(&self) -> Cuboid;
 }
 
 pub trait CollidesWithEverything<T>:
     Sized
     + Clone
+    + Bounded
     + Collides<T>
     + Collides<Capsule>
     + Collides<Cuboid>
@@ -178,6 +194,7 @@ impl<T, U> CollidesWithEverything<U> for T
 where
     T: Sized
         + Clone
+        + Bounded
         + Collides<U>
         + Collides<Capsule>
         + Collides<Cuboid>
@@ -197,281 +214,181 @@ pub trait ColliderComponent<PCL: PointCloudMarker = Pointcloud>: Sized + Clone {
     fn add_to_shapes(self, shapes: &mut Collider<PCL>);
 }
 
-macro_rules! impl_shape_for {
+macro_rules! impl_shape_for_bounded {
     ($ty:ty, $field:ident) => {
         impl<PCL: PointCloudMarker> ColliderComponent<PCL> for $ty {
-            fn add_to_shapes(self, shapes: &mut Collider<PCL>) {
-                shapes.$field.push(self);
+            fn add_to_shapes(self, c: &mut Collider<PCL>) {
+                c.expand_bounding(&self.broadphase());
+                c.$field.push(self);
             }
         }
     };
 }
 
-impl_shape_for!(Sphere, spheres);
-impl_shape_for!(Capsule, capsules);
-impl_shape_for!(Cuboid, cuboids);
-impl_shape_for!(ConvexPolytope, polytopes);
-impl_shape_for!(Plane, planes);
-impl_shape_for!(ConvexPolygon, polygons);
-impl_shape_for!(Point, points);
-impl_shape_for!(Line, lines);
-impl_shape_for!(Ray, rays);
-impl_shape_for!(LineSegment, segments);
+macro_rules! impl_shape_for_unbounded {
+    ($ty:ty, $field:ident) => {
+        impl<PCL: PointCloudMarker> ColliderComponent<PCL> for $ty {
+            fn add_to_shapes(self, c: &mut Collider<PCL>) {
+                c.bounding.radius = f32::INFINITY;
+                c.$field.push(self);
+            }
+        }
+    };
+}
+
+impl_shape_for_bounded!(Sphere, spheres);
+impl_shape_for_bounded!(Capsule, capsules);
+impl_shape_for_bounded!(Cuboid, cuboids);
+impl_shape_for_bounded!(ConvexPolytope, polytopes);
+impl_shape_for_bounded!(ConvexPolygon, polygons);
+impl_shape_for_bounded!(Point, points);
+impl_shape_for_bounded!(LineSegment, segments);
+impl_shape_for_unbounded!(Plane, planes);
+impl_shape_for_unbounded!(Line, lines);
+impl_shape_for_unbounded!(Ray, rays);
 
 impl ColliderComponent<Pointcloud> for Pointcloud {
-    fn add_to_shapes(self, shapes: &mut Collider<Pointcloud>) {
-        shapes.pointclouds.push(self);
+    fn add_to_shapes(self, c: &mut Collider<Pointcloud>) {
+        c.expand_bounding(&self.broadphase());
+        c.pointclouds.push(self);
     }
 }
 
 impl<const P: usize, const V: usize, PCL: PointCloudMarker> ColliderComponent<PCL> for ArrayConvexPolytope<P, V> {
-    fn add_to_shapes(self, shapes: &mut Collider<PCL>) {
-        shapes.polytopes.push(ConvexPolytope::from(self));
+    fn add_to_shapes(self, c: &mut Collider<PCL>) {
+        let poly = ConvexPolytope::from(self);
+        c.expand_bounding(&poly.broadphase());
+        c.polytopes.push(poly);
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Collider<PCL: PointCloudMarker = Pointcloud> {
-    pub capsules: Vec<Capsule>,
-    pub cuboids: Vec<Cuboid>,
-    pub planes: Vec<Plane>,
-    pub polygons: Vec<ConvexPolygon>,
-    pub polytopes: Vec<ConvexPolytope>,
-    pub points: Vec<Point>,
-    pub spheres: Vec<Sphere>,
-    pub lines: Vec<Line>,
-    pub rays: Vec<Ray>,
-    pub segments: Vec<LineSegment>,
-    pub pointclouds: Vec<PCL>,
+    capsules: soa::BroadCollection<Capsule>,
+    cuboids: soa::BroadCollection<Cuboid>,
+    planes: Vec<Plane>,
+    polygons: soa::BroadCollection<ConvexPolygon>,
+    polytopes: soa::BroadCollection<ConvexPolytope>,
+    points: soa::BroadCollection<Point>,
+    spheres: soa::BroadCollection<Sphere>,
+    lines: Vec<Line>,
+    rays: Vec<Ray>,
+    segments: soa::BroadCollection<LineSegment>,
+    pointclouds: soa::BroadCollection<PCL>,
+    bounding: Sphere
+}
+
+impl<PCL: PointCloudMarker> Default for Collider<PCL> {
+    fn default() -> Self {
+        Self {
+            capsules: Default::default(),
+            cuboids: Default::default(),
+            planes: Default::default(),
+            polygons: Default::default(),
+            polytopes: Default::default(),
+            points: Default::default(),
+            spheres: Default::default(),
+            lines: Default::default(),
+            rays: Default::default(),
+            segments: Default::default(),
+            pointclouds: Default::default(),
+            bounding: Sphere::new(glam::Vec3::ZERO, 0.0),
+        }
+    }
 }
 
 impl<PCL: PointCloudMarker> Transformable for Collider<PCL> {
     fn translate(&mut self, offset: glam::Vec3) {
-        for capsule in &mut self.capsules {
-            capsule.translate(offset);
-        }
-        for cuboid in &mut self.cuboids {
-            cuboid.translate(offset);
-        }
-        for plane in &mut self.planes {
-            plane.translate(offset);
-        }
-        for polygon in &mut self.polygons {
-            polygon.translate(offset);
-        }
-        for polytope in &mut self.polytopes {
-            polytope.translate(offset);
-        }
-        for point in &mut self.points {
-            point.translate(offset);
-        }
-        for sphere in &mut self.spheres {
-            sphere.translate(offset);
-        }
-        for line in &mut self.lines {
-            line.translate(offset);
-        }
-        for ray in &mut self.rays {
-            ray.translate(offset);
-        }
-        for segment in &mut self.segments {
-            segment.translate(offset);
-        }
+        self.capsules.translate(offset);
+        self.cuboids.translate(offset);
+        for plane in &mut self.planes { plane.translate(offset); }
+        self.polygons.translate(offset);
+        self.polytopes.translate(offset);
+        self.points.translate(offset);
+        self.spheres.translate(offset);
+        for line in &mut self.lines { line.translate(offset); }
+        for ray in &mut self.rays { ray.translate(offset); }
+        self.segments.translate(offset);
+        self.bounding.translate(offset);
     }
 
     fn rotate_mat(&mut self, mat: glam::Mat3) {
-        for capsule in &mut self.capsules {
-            capsule.rotate_mat(mat);
-        }
-        for cuboid in &mut self.cuboids {
-            cuboid.rotate_mat(mat);
-        }
-        for plane in &mut self.planes {
-            plane.rotate_mat(mat);
-        }
-        for polygon in &mut self.polygons {
-            polygon.rotate_mat(mat);
-        }
-        for polytope in &mut self.polytopes {
-            polytope.rotate_mat(mat);
-        }
-        for point in &mut self.points {
-            point.rotate_mat(mat);
-        }
-        for sphere in &mut self.spheres {
-            sphere.rotate_mat(mat);
-        }
-        for line in &mut self.lines {
-            line.rotate_mat(mat);
-        }
-        for ray in &mut self.rays {
-            ray.rotate_mat(mat);
-        }
-        for segment in &mut self.segments {
-            segment.rotate_mat(mat);
-        }
+        self.capsules.rotate_mat(mat);
+        self.cuboids.rotate_mat(mat);
+        for plane in &mut self.planes { plane.rotate_mat(mat); }
+        self.polygons.rotate_mat(mat);
+        self.polytopes.rotate_mat(mat);
+        self.points.rotate_mat(mat);
+        self.spheres.rotate_mat(mat);
+        for line in &mut self.lines { line.rotate_mat(mat); }
+        for ray in &mut self.rays { ray.rotate_mat(mat); }
+        self.segments.rotate_mat(mat);
+        self.bounding.center = mat * self.bounding.center;
     }
 
     fn rotate_quat(&mut self, quat: glam::Quat) {
-        for capsule in &mut self.capsules {
-            capsule.rotate_quat(quat);
-        }
-        for cuboid in &mut self.cuboids {
-            cuboid.rotate_quat(quat);
-        }
-        for plane in &mut self.planes {
-            plane.rotate_quat(quat);
-        }
-        for polygon in &mut self.polygons {
-            polygon.rotate_quat(quat);
-        }
-        for polytope in &mut self.polytopes {
-            polytope.rotate_quat(quat);
-        }
-        for point in &mut self.points {
-            point.rotate_quat(quat);
-        }
-        for sphere in &mut self.spheres {
-            sphere.rotate_quat(quat);
-        }
-        for line in &mut self.lines {
-            line.rotate_quat(quat);
-        }
-        for ray in &mut self.rays {
-            ray.rotate_quat(quat);
-        }
-        for segment in &mut self.segments {
-            segment.rotate_quat(quat);
-        }
+        self.capsules.rotate_quat(quat);
+        self.cuboids.rotate_quat(quat);
+        for plane in &mut self.planes { plane.rotate_quat(quat); }
+        self.polygons.rotate_quat(quat);
+        self.polytopes.rotate_quat(quat);
+        self.points.rotate_quat(quat);
+        self.spheres.rotate_quat(quat);
+        for line in &mut self.lines { line.rotate_quat(quat); }
+        for ray in &mut self.rays { ray.rotate_quat(quat); }
+        self.segments.rotate_quat(quat);
+        self.bounding.center = quat * self.bounding.center;
     }
 
     fn transform(&mut self, mat: glam::Affine3) {
-        for capsule in &mut self.capsules {
-            capsule.transform(mat);
-        }
-        for cuboid in &mut self.cuboids {
-            cuboid.transform(mat);
-        }
-        for plane in &mut self.planes {
-            plane.transform(mat);
-        }
-        for polygon in &mut self.polygons {
-            polygon.transform(mat);
-        }
-        for polytope in &mut self.polytopes {
-            polytope.transform(mat);
-        }
-        for point in &mut self.points {
-            point.transform(mat);
-        }
-        for sphere in &mut self.spheres {
-            sphere.transform(mat);
-        }
-        for line in &mut self.lines {
-            line.transform(mat);
-        }
-        for ray in &mut self.rays {
-            ray.transform(mat);
-        }
-        for segment in &mut self.segments {
-            segment.transform(mat);
-        }
+        self.capsules.transform(mat);
+        self.cuboids.transform(mat);
+        for plane in &mut self.planes { plane.transform(mat); }
+        self.polygons.transform(mat);
+        self.polytopes.transform(mat);
+        self.points.transform(mat);
+        self.spheres.transform(mat);
+        for line in &mut self.lines { line.transform(mat); }
+        for ray in &mut self.rays { ray.transform(mat); }
+        self.segments.transform(mat);
+        self.bounding.center = mat.transform_point3(self.bounding.center);
     }
 }
 
 impl<PCL: PointCloudMarker> Scalable for Collider<PCL> {
     fn scale(&mut self, factor: f32) {
-        for capsule in &mut self.capsules {
-            capsule.scale(factor);
-        }
-        for cuboid in &mut self.cuboids {
-            cuboid.scale(factor);
-        }
-        for plane in &mut self.planes {
-            plane.scale(factor);
-        }
-        for polygon in &mut self.polygons {
-            polygon.scale(factor);
-        }
-        for polytope in &mut self.polytopes {
-            polytope.scale(factor);
-        }
-        for point in &mut self.points {
-            point.scale(factor);
-        }
-        for sphere in &mut self.spheres {
-            sphere.scale(factor);
-        }
-        for line in &mut self.lines {
-            line.scale(factor);
-        }
-        for ray in &mut self.rays {
-            ray.scale(factor);
-        }
-        for segment in &mut self.segments {
-            segment.scale(factor);
-        }
+        self.capsules.scale(factor);
+        self.cuboids.scale(factor);
+        for plane in &mut self.planes { plane.scale(factor); }
+        self.polygons.scale(factor);
+        self.polytopes.scale(factor);
+        self.points.scale(factor);
+        self.spheres.scale(factor);
+        for line in &mut self.lines { line.scale(factor); }
+        for ray in &mut self.rays { ray.scale(factor); }
+        self.segments.scale(factor);
+        self.bounding.radius *= factor;
     }
 }
 
 impl<PCL: PointCloudMarker> Bounded for Collider<PCL> {
+    #[inline]
     fn broadphase(&self) -> Sphere {
-        if !self.planes.is_empty() || !self.lines.is_empty() || !self.rays.is_empty() {
-            return Sphere::new(glam::Vec3::ZERO, f32::INFINITY);
-        }
-        let aabb = self.aabb();
-        Sphere::new(aabb.center, aabb.bounding_sphere_radius())
+        self.bounding
     }
 
+    #[inline]
     fn obb(&self) -> Cuboid {
         self.aabb()
     }
 
+    #[inline]
     fn aabb(&self) -> Cuboid {
-        if !self.planes.is_empty() || !self.lines.is_empty() || !self.rays.is_empty() {
-            return Cuboid::new(
-                glam::Vec3::ZERO,
-                [glam::Vec3::X, glam::Vec3::Y, glam::Vec3::Z],
-                [f32::INFINITY, f32::INFINITY, f32::INFINITY],
-            );
-        }
-
-        let mut min = glam::Vec3::splat(f32::INFINITY);
-        let mut max = glam::Vec3::splat(f32::NEG_INFINITY);
-        let mut has_any = false;
-
-        macro_rules! merge_aabb {
-            ($items:expr) => {
-                for item in &$items {
-                    let bb = item.aabb();
-                    let lo = bb.center - glam::Vec3::new(bb.half_extents[0], bb.half_extents[1], bb.half_extents[2]);
-                    let hi = bb.center + glam::Vec3::new(bb.half_extents[0], bb.half_extents[1], bb.half_extents[2]);
-                    min = min.min(lo);
-                    max = max.max(hi);
-                    has_any = true;
-                }
-            };
-        }
-
-        merge_aabb!(self.spheres);
-        merge_aabb!(self.capsules);
-        merge_aabb!(self.cuboids);
-        merge_aabb!(self.polytopes);
-        merge_aabb!(self.polygons);
-        merge_aabb!(self.segments);
-        merge_aabb!(self.pointclouds);
-
-        for pt in &self.points {
-            min = min.min(pt.0);
-            max = max.max(pt.0);
-            has_any = true;
-        }
-
-        if !has_any {
-            return Cuboid::from_aabb(glam::Vec3::ZERO, glam::Vec3::ZERO);
-        }
-
-        Cuboid::from_aabb(min, max)
+        let r = self.bounding.radius;
+        Cuboid::from_aabb(
+            self.bounding.center - glam::Vec3::splat(r),
+            self.bounding.center + glam::Vec3::splat(r),
+        )
     }
 }
 
@@ -479,29 +396,7 @@ impl Stretchable for Collider<NoPcl> {
     type Output = Self;
 
     fn stretch(&self, translation: glam::Vec3) -> Self::Output {
-        let mut out = Collider {
-            spheres: Vec::with_capacity(self.spheres.len()),
-            capsules: Vec::with_capacity(self.spheres.len() + 4 * self.capsules.len()),
-            cuboids: Vec::with_capacity(self.cuboids.len()),
-            polytopes: Vec::with_capacity(
-                self.capsules.len()
-                    + self.cuboids.len()
-                    + self.polytopes.len()
-                    + self.polygons.len(),
-            ),
-            planes: Vec::with_capacity(self.planes.len()),
-            polygons: Vec::with_capacity(
-                self.polygons.len()
-                    + self.lines.len()
-                    + self.rays.len()
-                    + self.segments.len(),
-            ),
-            points: Vec::new(),
-            lines: Vec::with_capacity(self.lines.len()),
-            rays: Vec::with_capacity(self.rays.len()),
-            segments: Vec::with_capacity(self.points.len() + self.segments.len()),
-            pointclouds: Vec::new(),
-        };
+        let mut out = Collider::default();
 
         for sphere in &self.spheres {
             match sphere.stretch(translation) {
@@ -567,45 +462,122 @@ impl Stretchable for Collider<NoPcl> {
             }
         }
 
+        out.recompute_bounding();
         out
     }
 }
 
 impl<PCL: PointCloudMarker> Collider<PCL> {
     pub fn new() -> Self {
-        Collider {
-            capsules: Vec::new(),
-            cuboids: Vec::new(),
-            planes: Vec::new(),
-            polygons: Vec::new(),
-            polytopes: Vec::new(),
-            points: Vec::new(),
-            spheres: Vec::new(),
-            lines: Vec::new(),
-            rays: Vec::new(),
-            segments: Vec::new(),
-            pointclouds: Vec::new(),
+        Self::default()
+    }
+
+    /// Expand the cached bounding sphere to enclose `other`.
+    fn expand_bounding(&mut self, other: &Sphere) {
+        if self.bounding.radius == 0.0 && self.bounding.center == glam::Vec3::ZERO {
+            // First shape — just adopt its bounding sphere.
+            self.bounding = *other;
+            return;
+        }
+        let d = other.center - self.bounding.center;
+        let dist = d.length();
+        let needed = dist + other.radius;
+        if needed > self.bounding.radius {
+            // New sphere that encloses both.
+            let new_radius = (self.bounding.radius + needed) * 0.5;
+            let shift = new_radius - self.bounding.radius;
+            if dist > f32::EPSILON {
+                self.bounding.center += d * (shift / dist);
+            }
+            self.bounding.radius = new_radius;
         }
     }
 
-    pub fn collides<T: CollidesWithEverything<PCL>>(&self, shape: &T) -> bool {
-        false
-            || if !&self.capsules.is_empty() { shape.collides_many(&self.capsules) } else { false }
-            || if !&self.cuboids.is_empty() { shape.collides_many(&self.cuboids) } else { false }
-            || if !&self.planes.is_empty() { shape.collides_many(&self.planes) } else { false }
-            || if !&self.polygons.is_empty() { shape.collides_many(&self.polygons) } else { false }
-            || if !&self.polytopes.is_empty() { shape.collides_many(&self.polytopes) } else { false }
-            || if !&self.points.is_empty() { shape.collides_many(&self.points) } else { false }
-            || if !&self.spheres.is_empty() { shape.collides_many(&self.spheres) } else { false }
-            || if !&self.lines.is_empty() { shape.collides_many(&self.lines) } else { false }
-            || if !&self.rays.is_empty() { shape.collides_many(&self.rays) } else { false }
-            || if !&self.segments.is_empty() { shape.collides_many(&self.segments) } else { false }
-            || if !&self.pointclouds.is_empty() { shape.collides_many(&self.pointclouds) } else { false }
+    /// Recompute bounding sphere from scratch (e.g. after stretch).
+    fn recompute_bounding(&mut self) {
+        if !self.planes.is_empty() || !self.lines.is_empty() || !self.rays.is_empty() {
+            self.bounding = Sphere::new(glam::Vec3::ZERO, f32::INFINITY);
+            return;
+        }
+
+        let mut center = glam::Vec3::ZERO;
+        let mut radius = 0.0f32;
+        let mut first = true;
+
+        macro_rules! merge {
+            ($col:expr) => {
+                for item in $col.iter() {
+                    let bp = item.broadphase();
+                    if first {
+                        center = bp.center;
+                        radius = bp.radius;
+                        first = false;
+                        continue;
+                    }
+                    let d = bp.center - center;
+                    let dist = d.length();
+                    let needed = dist + bp.radius;
+                    if needed > radius {
+                        let new_radius = (radius + needed) * 0.5;
+                        let shift = new_radius - radius;
+                        if dist > f32::EPSILON {
+                            center += d * (shift / dist);
+                        }
+                        radius = new_radius;
+                    }
+                }
+            };
+        }
+        merge!(self.spheres);
+        merge!(self.capsules);
+        merge!(self.cuboids);
+        merge!(self.polytopes);
+        merge!(self.polygons);
+        merge!(self.points);
+        merge!(self.segments);
+        merge!(self.pointclouds);
+
+        if first {
+            self.bounding = Sphere::new(glam::Vec3::ZERO, 0.0);
+        } else {
+            self.bounding = Sphere::new(center, radius);
+        }
     }
 
-    #[inline]
-    pub fn collides_many<T: CollidesWithEverything<PCL>>(&self, shapes: &[T]) -> bool {
-        shapes.iter().any(|shape| self.collides(shape))
+    /// Check if `query` sphere overlaps any per-shape broadphase sphere
+    /// in this collider (bounded shapes only).
+    fn broad_overlaps_any(&self, query: &Sphere) -> bool {
+        self.spheres.broad.any_collides_sphere(query)
+            || self.capsules.broad.any_collides_sphere(query)
+            || self.cuboids.broad.any_collides_sphere(query)
+            || self.polygons.broad.any_collides_sphere(query)
+            || self.polytopes.broad.any_collides_sphere(query)
+            || self.points.broad.any_collides_sphere(query)
+            || self.segments.broad.any_collides_sphere(query)
+            || self.pointclouds.broad.any_collides_sphere(query)
+            || !self.planes.is_empty()
+            || !self.lines.is_empty()
+            || !self.rays.is_empty()
+    }
+
+    pub fn capsules(&self) -> &[Capsule] { self.capsules.items() }
+    pub fn cuboids(&self) -> &[Cuboid] { self.cuboids.items() }
+    pub fn planes(&self) -> &[Plane] { &self.planes }
+    pub fn polygons(&self) -> &[ConvexPolygon] { self.polygons.items() }
+    pub fn polytopes(&self) -> &[ConvexPolytope] { self.polytopes.items() }
+    pub fn points(&self) -> &[Point] { self.points.items() }
+    pub fn spheres(&self) -> &[Sphere] { self.spheres.items() }
+    pub fn lines(&self) -> &[Line] { &self.lines }
+    pub fn rays(&self) -> &[Ray] { &self.rays }
+    pub fn segments(&self) -> &[LineSegment] { self.segments.items() }
+    pub fn pointclouds(&self) -> &[PCL] { self.pointclouds.items() }
+
+    /// Collision test — dispatches to SIMD-accelerated batch paths when
+    /// available for the concrete query type, otherwise broadphase + scalar
+    /// narrowphase via [`BroadCollection`].
+    #[must_use]
+    pub fn collides<T: ColliderQuery<PCL>>(&self, shape: &T) -> bool {
+        shape.query_collider(self)
     }
 
     #[inline]
@@ -628,33 +600,222 @@ impl<PCL: PointCloudMarker> Collider<PCL> {
     }
 }
 
-impl Collider<NoPcl> {
-    pub fn collides_other(&self, other: &Collider<NoPcl>) -> bool {
-        self.collides_many(&other.capsules)
-            || self.collides_many(&other.cuboids)
-            || self.collides_many(&other.planes)
-            || self.collides_many(&other.polygons)
-            || self.collides_many(&other.polytopes)
-            || self.collides_many(&other.points)
-            || self.collides_many(&other.spheres)
-            || self.collides_many(&other.lines)
-            || self.collides_many(&other.rays)
-            || self.collides_many(&other.segments)
+/// Trait for types that can query a [`Collider`] for collisions.
+/// Each shape type implements this with its own optimized dispatch path,
+/// so `Collider::collides` and `collides_other` just call through here.
+pub trait ColliderQuery<PCL: PointCloudMarker>: Sized + Clone {
+    fn query_collider(&self, collider: &Collider<PCL>) -> bool;
+}
+
+/// Generic broadphase + scalar narrowphase path for bounded shape types.
+macro_rules! impl_collider_query_generic {
+    ($ty:ty) => {
+        impl ColliderQuery<NoPcl> for $ty {
+            fn query_collider(&self, c: &Collider<NoPcl>) -> bool {
+                c.spheres.collides_only_broadphase(self)
+                    || c.points.collides(self)
+                    || c.capsules.collides(self)
+                    || c.cuboids.collides(self)
+                    || c.segments.collides(self)
+                    || c.polygons.collides(self)
+                    || c.polytopes.collides(self)
+                    || c.planes.iter().any(|x| self.collides(x))
+                    || c.lines.iter().any(|x| self.collides(x))
+                    || c.rays.iter().any(|x| self.collides(x))
+                    || c.pointclouds.collides(self)
+            }
+        }
+        impl ColliderQuery<Pointcloud> for $ty {
+            fn query_collider(&self, c: &Collider<Pointcloud>) -> bool {
+                c.spheres.collides_only_broadphase(self)
+                    || c.points.collides(self)
+                    || c.capsules.collides(self)
+                    || c.cuboids.collides(self)
+                    || c.segments.collides(self)
+                    || c.polygons.collides(self)
+                    || c.polytopes.collides(self)
+                    || c.planes.iter().any(|x| self.collides(x))
+                    || c.lines.iter().any(|x| self.collides(x))
+                    || c.rays.iter().any(|x| self.collides(x))
+                    || c.pointclouds.collides(self)
+            }
+        }
+    };
+}
+
+impl_collider_query_generic!(Capsule);
+impl_collider_query_generic!(Cuboid);
+impl_collider_query_generic!(ConvexPolygon);
+impl_collider_query_generic!(ConvexPolytope);
+/// Point: broadphase-only for spheres and points (zero-radius sphere check).
+macro_rules! impl_collider_query_point {
+    ($pcl:ty) => {
+        impl ColliderQuery<$pcl> for Point {
+            fn query_collider(&self, c: &Collider<$pcl>) -> bool {
+                c.spheres.collides_only_broadphase(self)
+                    || c.points.collides_only_broadphase(self)
+                    || c.capsules.collides(self)
+                    || c.cuboids.collides(self)
+                    || c.segments.collides(self)
+                    || c.polygons.collides(self)
+                    || c.polytopes.collides(self)
+                    || c.planes.iter().any(|x| self.collides(x))
+                    || c.lines.iter().any(|x| self.collides(x))
+                    || c.rays.iter().any(|x| self.collides(x))
+                    || c.pointclouds.collides(self)
+            }
+        }
+    };
+}
+impl_collider_query_point!(NoPcl);
+impl_collider_query_point!(Pointcloud);
+
+/// Sphere: broadphase-only for spheres/points, SIMD batch for capsules/cuboids.
+macro_rules! impl_collider_query_sphere {
+    ($pcl:ty) => {
+        impl ColliderQuery<$pcl> for Sphere {
+            fn query_collider(&self, c: &Collider<$pcl>) -> bool {
+                c.spheres.collides_only_broadphase(self)
+                    || c.points.collides_only_broadphase(self)
+                    || (c.capsules.collides_only_broadphase(self)
+                        && soa::batch::sphere_vs_capsules(self, c.capsules.items()))
+                    || (c.cuboids.collides_only_broadphase(self)
+                        && soa::batch::sphere_vs_cuboids(self, c.cuboids.items()))
+                    || c.segments.collides(self)
+                    || c.polygons.collides(self)
+                    || c.polytopes.collides(self)
+                    || c.planes.iter().any(|x| self.collides(x))
+                    || c.lines.iter().any(|x| self.collides(x))
+                    || c.rays.iter().any(|x| self.collides(x))
+                    || c.pointclouds.collides(self)
+            }
+        }
+    };
+}
+impl_collider_query_sphere!(NoPcl);
+impl_collider_query_sphere!(Pointcloud);
+
+/// Plane: SIMD batch for spheres/capsules/cuboids, scalar for rest.
+macro_rules! impl_collider_query_plane {
+    ($pcl:ty) => {
+        impl ColliderQuery<$pcl> for Plane {
+            fn query_collider(&self, c: &Collider<$pcl>) -> bool {
+                soa::batch::plane_vs_spheres(self, c.spheres.items())
+                    || soa::batch::plane_vs_capsules(self, c.capsules.items())
+                    || soa::batch::plane_vs_cuboids(self, c.cuboids.items())
+                    || c.points.iter().any(|x| self.collides(x))
+                    || c.segments.iter().any(|x| self.collides(x))
+                    || c.polygons.iter().any(|x| self.collides(x))
+                    || c.polytopes.iter().any(|x| self.collides(x))
+                    || c.planes.iter().any(|x| self.collides(x))
+                    || c.lines.iter().any(|x| self.collides(x))
+                    || c.rays.iter().any(|x| self.collides(x))
+                    || c.pointclouds.iter().any(|x| self.collides(x))
+            }
+        }
+    };
+}
+impl_collider_query_plane!(NoPcl);
+impl_collider_query_plane!(Pointcloud);
+
+/// Line/Ray: SIMD batch for spheres, scalar for rest.
+macro_rules! impl_collider_query_line_like {
+    ($ty:ty, $batch_fn:path, $pcl:ty) => {
+        impl ColliderQuery<$pcl> for $ty {
+            fn query_collider(&self, c: &Collider<$pcl>) -> bool {
+                $batch_fn(self, c.spheres.items())
+                    || c.capsules.iter().any(|x| self.collides(x))
+                    || c.cuboids.iter().any(|x| self.collides(x))
+                    || c.segments.iter().any(|x| self.collides(x))
+                    || c.polygons.iter().any(|x| self.collides(x))
+                    || c.polytopes.iter().any(|x| self.collides(x))
+                    || c.planes.iter().any(|x| self.collides(x))
+                    || c.points.iter().any(|x| self.collides(x))
+                    || c.lines.iter().any(|x| self.collides(x))
+                    || c.rays.iter().any(|x| self.collides(x))
+                    || c.pointclouds.iter().any(|x| self.collides(x))
+            }
+        }
+    };
+}
+impl_collider_query_line_like!(Line, soa::batch::line_vs_spheres, NoPcl);
+impl_collider_query_line_like!(Line, soa::batch::line_vs_spheres, Pointcloud);
+impl_collider_query_line_like!(Ray, soa::batch::ray_vs_spheres, NoPcl);
+impl_collider_query_line_like!(Ray, soa::batch::ray_vs_spheres, Pointcloud);
+
+/// LineSegment: SIMD batch for spheres, broadphase for bounded types.
+macro_rules! impl_collider_query_segment {
+    ($pcl:ty) => {
+        impl ColliderQuery<$pcl> for LineSegment {
+            fn query_collider(&self, c: &Collider<$pcl>) -> bool {
+                (c.spheres.collides_only_broadphase(self)
+                    && soa::batch::segment_vs_spheres(self, c.spheres.items()))
+                    || c.capsules.collides(self)
+                    || c.cuboids.collides(self)
+                    || c.segments.collides(self)
+                    || c.polygons.collides(self)
+                    || c.polytopes.collides(self)
+                    || c.planes.iter().any(|x| self.collides(x))
+                    || c.points.iter().any(|x| self.collides(x))
+                    || c.lines.iter().any(|x| self.collides(x))
+                    || c.rays.iter().any(|x| self.collides(x))
+                    || c.pointclouds.collides(self)
+            }
+        }
+    };
+}
+impl_collider_query_segment!(NoPcl);
+impl_collider_query_segment!(Pointcloud);
+
+/// Pointcloud: can only query NoPcl colliders.
+impl ColliderQuery<NoPcl> for Pointcloud {
+    fn query_collider(&self, c: &Collider<NoPcl>) -> bool {
+        c.spheres.collides_only_broadphase(self)
+            || c.points.collides(self)
+            || c.capsules.collides(self)
+            || c.cuboids.collides(self)
+            || c.segments.collides(self)
+            || c.polygons.collides(self)
+            || c.polytopes.collides(self)
+            || c.planes.iter().any(|x| self.collides(x))
+            || c.lines.iter().any(|x| self.collides(x))
+            || c.rays.iter().any(|x| self.collides(x))
+            || c.pointclouds.collides(self)
     }
 }
 
+macro_rules! impl_collider_collides_other {
+    ($pcl:ty) => {
+        impl Collider<$pcl> {
+            #[must_use]
+            pub fn collides_other(&self, other: &Collider<$pcl>) -> bool {
+                // Top-level broadphase: bounding spheres of both colliders
+                if !self.bounding.collides(&other.bounding) {
+                    return false;
+                }
+                // Check each collider's bounding sphere against the other's
+                // per-shape broadphase SoA — if neither can see the other,
+                // no individual shape pair can collide.
+                if !other.broad_overlaps_any(&self.bounding)
+                    && !self.broad_overlaps_any(&other.bounding)
+                {
+                    return false;
+                }
 
-impl Collider<Pointcloud> {
-    pub fn collides_other(&self, other: &Collider<Pointcloud>) -> bool {
-        self.collides_many(&other.capsules)
-            || self.collides_many(&other.cuboids)
-            || self.collides_many(&other.planes)
-            || self.collides_many(&other.polygons)
-            || self.collides_many(&other.polytopes)
-            || self.collides_many(&other.points)
-            || self.collides_many(&other.spheres)
-            || self.collides_many(&other.lines)
-            || self.collides_many(&other.rays)
-            || self.collides_many(&other.segments)
-    }
+                other.spheres.iter().any(|x| self.collides(x))
+                    || other.points.iter().any(|x| self.collides(x))
+                    || other.capsules.iter().any(|x| self.collides(x))
+                    || other.cuboids.iter().any(|x| self.collides(x))
+                    || other.segments.iter().any(|x| self.collides(x))
+                    || other.polygons.iter().any(|x| self.collides(x))
+                    || other.polytopes.iter().any(|x| self.collides(x))
+                    || other.planes.iter().any(|x| self.collides(x))
+                    || other.lines.iter().any(|x| self.collides(x))
+                    || other.rays.iter().any(|x| self.collides(x))
+            }
+        }
+    };
 }
+
+impl_collider_collides_other!(NoPcl);
+impl_collider_collides_other!(Pointcloud);

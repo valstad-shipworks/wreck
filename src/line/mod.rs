@@ -10,7 +10,6 @@ pub use segment::LineSegment;
 pub use segment::LineSegmentStretch;
 
 use glam::Vec3;
-use wide::{f32x8, CmpLe};
 
 use crate::capsule::Capsule;
 use crate::cuboid::Cuboid;
@@ -42,64 +41,6 @@ pub(crate) fn line_sphere_collides(
     let closest = origin + dir * t;
     let d = closest - sphere.center;
     d.dot(d) <= sphere.radius * sphere.radius
-}
-
-/// SIMD collides_many for parametric line vs spheres.
-pub(crate) fn simd_collides_many_spheres(
-    origin: Vec3, dir: Vec3, rdv: f32,
-    t_min: f32, t_max: f32,
-    others: &[Sphere],
-    scalar_check: impl Fn(&Sphere) -> bool,
-) -> bool {
-    let ox = f32x8::splat(origin.x);
-    let oy = f32x8::splat(origin.y);
-    let oz = f32x8::splat(origin.z);
-    let dx = f32x8::splat(dir.x);
-    let dy = f32x8::splat(dir.y);
-    let dz = f32x8::splat(dir.z);
-    let rdv8 = f32x8::splat(rdv);
-    let lo = f32x8::splat(t_min);
-    let hi = f32x8::splat(t_max);
-
-    let chunks = others.chunks_exact(8);
-    let remainder = chunks.remainder();
-
-    for chunk in chunks {
-        let mut cx = [0.0f32; 8];
-        let mut cy = [0.0f32; 8];
-        let mut cz = [0.0f32; 8];
-        let mut r = [0.0f32; 8];
-        for (i, s) in chunk.iter().enumerate() {
-            cx[i] = s.center.x;
-            cy[i] = s.center.y;
-            cz[i] = s.center.z;
-            r[i] = s.radius;
-        }
-        let cx = f32x8::new(cx);
-        let cy = f32x8::new(cy);
-        let cz = f32x8::new(cz);
-        let r = f32x8::new(r);
-
-        let dfx = cx - ox;
-        let dfy = cy - oy;
-        let dfz = cz - oz;
-        let t = ((dfx * dx + dfy * dy + dfz * dz) * rdv8).max(lo).min(hi);
-
-        let px = ox + dx * t;
-        let py = oy + dy * t;
-        let pz = oz + dz * t;
-
-        let ex = cx - px;
-        let ey = cy - py;
-        let ez = cz - pz;
-        let dist_sq = ex * ex + ey * ey + ez * ez;
-
-        if dist_sq.simd_le(r * r).any() {
-            return true;
-        }
-    }
-
-    remainder.iter().any(|s| scalar_check(s))
 }
 
 /// Does the parametric line collide with a capsule?
@@ -214,45 +155,45 @@ use crate::Collides;
 
 impl Collides<Line> for Line {
     #[inline]
-    fn collides(&self, _other: &Line) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &Line) -> bool { false }
 }
 
 impl Collides<Ray> for Ray {
     #[inline]
-    fn collides(&self, _other: &Ray) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &Ray) -> bool { false }
 }
 
 impl Collides<LineSegment> for LineSegment {
     #[inline]
-    fn collides(&self, _other: &LineSegment) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &LineSegment) -> bool { false }
 }
 
 impl Collides<Ray> for Line {
     #[inline]
-    fn collides(&self, _other: &Ray) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &Ray) -> bool { false }
 }
 
 impl Collides<Line> for Ray {
     #[inline]
-    fn collides(&self, _other: &Line) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &Line) -> bool { false }
 }
 
 impl Collides<LineSegment> for Line {
     #[inline]
-    fn collides(&self, _other: &LineSegment) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &LineSegment) -> bool { false }
 }
 
 impl Collides<Line> for LineSegment {
     #[inline]
-    fn collides(&self, _other: &Line) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &Line) -> bool { false }
 }
 
 impl Collides<LineSegment> for Ray {
     #[inline]
-    fn collides(&self, _other: &LineSegment) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &LineSegment) -> bool { false }
 }
 
 impl Collides<Ray> for LineSegment {
     #[inline]
-    fn collides(&self, _other: &Ray) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &Ray) -> bool { false }
 }

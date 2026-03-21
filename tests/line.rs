@@ -114,7 +114,7 @@ fn line_collides_many_spheres() {
         .map(|i| Sphere::new(Vec3::new(0.0, i as f32 * 0.5, 0.0), 0.1))
         .collect();
 
-    let simd_result = l.collides_many(&spheres);
+    let simd_result = spheres.iter().any(|x| l.collides(x));
     let scalar_result = spheres.iter().any(|s| l.collides(s));
     assert_eq!(simd_result, scalar_result);
 }
@@ -223,7 +223,7 @@ fn ray_collides_many_spheres() {
         .map(|i| Sphere::new(Vec3::new(i as f32 - 5.0, 0.0, 0.0), 0.1))
         .collect();
 
-    let simd_result = r.collides_many(&spheres);
+    let simd_result = spheres.iter().any(|x| r.collides(x));
     let scalar_result = spheres.iter().any(|s| r.collides(s));
     assert_eq!(simd_result, scalar_result);
 }
@@ -316,7 +316,7 @@ fn segment_collides_many_spheres() {
         .map(|i| Sphere::new(Vec3::new(i as f32 - 5.0, 0.0, 0.0), 0.1))
         .collect();
 
-    let simd_result = s.collides_many(&spheres);
+    let simd_result = spheres.iter().any(|x| s.collides(x));
     let scalar_result = spheres.iter().any(|sp| s.collides(sp));
     assert_eq!(simd_result, scalar_result);
 }

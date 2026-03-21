@@ -1,7 +1,7 @@
 use crate::convex_polytope::array::ArrayConvexPolytope;
 use crate::{Bounded, Collides, Cuboid, Scalable, Sphere, Stretchable, Transformable};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct NoPcl;
 
 
@@ -9,11 +9,11 @@ macro_rules! impl_collides_nopcl {
     ($($ty:ty),* $(,)?) => {$(
         impl Collides<NoPcl> for $ty {
             #[inline]
-            fn collides(&self, _other: &NoPcl) -> bool { false }
+            fn test<const BROADPHASE: bool>(&self, _other: &NoPcl) -> bool { false }
         }
         impl Collides<$ty> for NoPcl {
             #[inline]
-            fn collides(&self, _other: &$ty) -> bool { false }
+            fn test<const BROADPHASE: bool>(&self, _other: &$ty) -> bool { false }
         }
     )*};
 }
@@ -34,7 +34,7 @@ impl_collides_nopcl!(
 
 impl<const P: usize, const V: usize> Collides<NoPcl> for ArrayConvexPolytope<P, V> {
     #[inline]
-    fn collides(&self, _other: &NoPcl) -> bool {
+    fn test<const BROADPHASE: bool>(&self, _other: &NoPcl) -> bool {
         false
     }
 }

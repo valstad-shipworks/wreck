@@ -131,11 +131,6 @@ impl ConvexPolygon {
     pub(crate) fn parametric_line_dist_sq(&self, origin: Vec3, dir: Vec3, t_min: f32, t_max: f32) -> f32 {
         self.as_ref().parametric_line_dist_sq(origin, dir, t_min, t_max)
     }
-
-    #[inline]
-    pub(crate) fn bounding_sphere(&self) -> (Vec3, f32) {
-        (self.center, self.bounding_radius)
-    }
 }
 
 #[inherent]
@@ -359,24 +354,14 @@ fn convex_hull_2d(points: &mut Vec<[f32; 2]>) -> Vec<[f32; 2]> {
 
 impl Collides<Sphere> for ConvexPolygon {
     #[inline]
-    fn collides(&self, sphere: &Sphere) -> bool {
+    fn test<const BROADPHASE: bool>(&self, sphere: &Sphere) -> bool {
         ref_polygon_sphere_collides(&self.as_ref(), sphere)
-    }
-
-    fn collides_many(&self, others: &[Sphere]) -> bool {
-        crate::broadphase_collides_many(
-            self.center,
-            self.bounding_radius,
-            others,
-            |s| (s.center, s.radius),
-            |s| ref_polygon_sphere_collides(&self.as_ref(), s),
-        )
     }
 }
 
 impl Collides<ConvexPolygon> for Sphere {
     #[inline]
-    fn collides(&self, polygon: &ConvexPolygon) -> bool {
+    fn test<const BROADPHASE: bool>(&self, polygon: &ConvexPolygon) -> bool {
         ref_polygon_sphere_collides(&polygon.as_ref(), self)
     }
 }
@@ -387,24 +372,14 @@ impl Collides<ConvexPolygon> for Sphere {
 
 impl Collides<Capsule> for ConvexPolygon {
     #[inline]
-    fn collides(&self, capsule: &Capsule) -> bool {
+    fn test<const BROADPHASE: bool>(&self, capsule: &Capsule) -> bool {
         ref_polygon_capsule_collides(&self.as_ref(), capsule)
-    }
-
-    fn collides_many(&self, others: &[Capsule]) -> bool {
-        crate::broadphase_collides_many(
-            self.center,
-            self.bounding_radius,
-            others,
-            |c| c.bounding_sphere(),
-            |c| ref_polygon_capsule_collides(&self.as_ref(), c),
-        )
     }
 }
 
 impl Collides<ConvexPolygon> for Capsule {
     #[inline]
-    fn collides(&self, polygon: &ConvexPolygon) -> bool {
+    fn test<const BROADPHASE: bool>(&self, polygon: &ConvexPolygon) -> bool {
         ref_polygon_capsule_collides(&polygon.as_ref(), self)
     }
 }
@@ -415,24 +390,14 @@ impl Collides<ConvexPolygon> for Capsule {
 
 impl Collides<Cuboid> for ConvexPolygon {
     #[inline]
-    fn collides(&self, cuboid: &Cuboid) -> bool {
+    fn test<const BROADPHASE: bool>(&self, cuboid: &Cuboid) -> bool {
         ref_polygon_cuboid_collides(&self.as_ref(), cuboid)
-    }
-
-    fn collides_many(&self, others: &[Cuboid]) -> bool {
-        crate::broadphase_collides_many(
-            self.center,
-            self.bounding_radius,
-            others,
-            |c| (c.center, c.bounding_sphere_radius()),
-            |c| ref_polygon_cuboid_collides(&self.as_ref(), c),
-        )
     }
 }
 
 impl Collides<ConvexPolygon> for Cuboid {
     #[inline]
-    fn collides(&self, polygon: &ConvexPolygon) -> bool {
+    fn test<const BROADPHASE: bool>(&self, polygon: &ConvexPolygon) -> bool {
         ref_polygon_cuboid_collides(&polygon.as_ref(), self)
     }
 }
@@ -443,38 +408,28 @@ impl Collides<ConvexPolygon> for Cuboid {
 
 impl Collides<ConvexPolytope> for ConvexPolygon {
     #[inline]
-    fn collides(&self, polytope: &ConvexPolytope) -> bool {
+    fn test<const BROADPHASE: bool>(&self, polytope: &ConvexPolytope) -> bool {
         ref_polygon_polytope_collides(&self.as_ref(), &polytope.planes, &polytope.vertices, &polytope.obb)
-    }
-
-    fn collides_many(&self, others: &[ConvexPolytope]) -> bool {
-        crate::broadphase_collides_many(
-            self.center,
-            self.bounding_radius,
-            others,
-            |p| (p.obb.center, p.obb.bounding_sphere_radius()),
-            |p| self.collides(p),
-        )
     }
 }
 
 impl Collides<ConvexPolygon> for ConvexPolytope {
     #[inline]
-    fn collides(&self, polygon: &ConvexPolygon) -> bool {
+    fn test<const BROADPHASE: bool>(&self, polygon: &ConvexPolygon) -> bool {
         ref_polygon_polytope_collides(&polygon.as_ref(), &self.planes, &self.vertices, &self.obb)
     }
 }
 
 impl<const P: usize, const V: usize> Collides<ArrayConvexPolytope<P, V>> for ConvexPolygon {
     #[inline]
-    fn collides(&self, polytope: &ArrayConvexPolytope<P, V>) -> bool {
+    fn test<const BROADPHASE: bool>(&self, polytope: &ArrayConvexPolytope<P, V>) -> bool {
         ref_polygon_polytope_collides(&self.as_ref(), &polytope.planes, &polytope.vertices, &polytope.obb)
     }
 }
 
 impl<const P: usize, const V: usize> Collides<ConvexPolygon> for ArrayConvexPolytope<P, V> {
     #[inline]
-    fn collides(&self, polygon: &ConvexPolygon) -> bool {
+    fn test<const BROADPHASE: bool>(&self, polygon: &ConvexPolygon) -> bool {
         ref_polygon_polytope_collides(&polygon.as_ref(), &self.planes, &self.vertices, &self.obb)
     }
 }
@@ -485,15 +440,15 @@ impl<const P: usize, const V: usize> Collides<ConvexPolygon> for ArrayConvexPoly
 
 impl Collides<Plane> for ConvexPolygon {
     #[inline]
-    fn collides(&self, plane: &Plane) -> bool {
+    fn test<const BROADPHASE: bool>(&self, plane: &Plane) -> bool {
         ref_polygon_infinite_plane_collides(&self.as_ref(), plane)
     }
 }
 
 impl Collides<ConvexPolygon> for Plane {
     #[inline]
-    fn collides(&self, polygon: &ConvexPolygon) -> bool {
-        polygon.collides(self)
+    fn test<const BROADPHASE: bool>(&self, polygon: &ConvexPolygon) -> bool {
+        polygon.test::<BROADPHASE>(self)
     }
 }
 
@@ -502,18 +457,8 @@ impl Collides<ConvexPolygon> for Plane {
 // ---------------------------------------------------------------------------
 
 impl Collides<ConvexPolygon> for ConvexPolygon {
-    fn collides(&self, other: &ConvexPolygon) -> bool {
+    fn test<const BROADPHASE: bool>(&self, other: &ConvexPolygon) -> bool {
         ref_polygon_polygon_collides(&self.as_ref(), &other.as_ref())
-    }
-
-    fn collides_many(&self, others: &[ConvexPolygon]) -> bool {
-        crate::broadphase_collides_many(
-            self.center,
-            self.bounding_radius,
-            others,
-            |p| p.bounding_sphere(),
-            |p| self.collides(p),
-        )
     }
 }
 

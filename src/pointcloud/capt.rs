@@ -242,7 +242,7 @@ fn clamp<A: PartialOrd>(x: A, min: A, max: A) -> A {
 }
 
 #[inline]
-#[allow(clippy::cast_sign_loss)]
+#[allow(clippy::cast_sign_loss, dead_code)]
 fn forward_pass_wide<const K: usize>(tests: &[f32], centers: &[f32x8; K]) -> i32x8 {
     let mut test_idxs = i32x8::splat(0_i32);
     let mut k = 0;
