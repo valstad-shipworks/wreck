@@ -45,14 +45,22 @@ fn sphere_polytope_separated() {
 #[test]
 fn cuboid_polytope_overlapping() {
     let p = unit_cube_polytope();
-    let c = Cuboid::new(Vec3::new(1.5, 0.0, 0.0), [Vec3::X, Vec3::Y, Vec3::Z], [1.0, 1.0, 1.0]);
+    let c = Cuboid::new(
+        Vec3::new(1.5, 0.0, 0.0),
+        [Vec3::X, Vec3::Y, Vec3::Z],
+        [1.0, 1.0, 1.0],
+    );
     assert!(c.collides(&p));
 }
 
 #[test]
 fn cuboid_polytope_separated() {
     let p = unit_cube_polytope();
-    let c = Cuboid::new(Vec3::new(5.0, 0.0, 0.0), [Vec3::X, Vec3::Y, Vec3::Z], [1.0, 1.0, 1.0]);
+    let c = Cuboid::new(
+        Vec3::new(5.0, 0.0, 0.0),
+        [Vec3::X, Vec3::Y, Vec3::Z],
+        [1.0, 1.0, 1.0],
+    );
     assert!(!c.collides(&p));
 }
 

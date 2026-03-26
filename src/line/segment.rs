@@ -13,7 +13,7 @@ const T_MIN: f32 = 0.0;
 const T_MAX: f32 = 1.0;
 
 /// A line segment from `p1` to `p1 + dir`.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LineSegment {
     pub p1: Vec3,
     pub dir: Vec3,
@@ -27,7 +27,11 @@ impl LineSegment {
         Self {
             p1,
             dir,
-            rdv: if len_sq > f32::EPSILON { 1.0 / len_sq } else { 0.0 },
+            rdv: if len_sq > f32::EPSILON {
+                1.0 / len_sq
+            } else {
+                0.0
+            },
         }
     }
 
@@ -75,7 +79,11 @@ impl Scalable for LineSegment {
     pub fn scale(&mut self, factor: f32) {
         self.dir *= factor;
         let len_sq = self.dir.dot(self.dir);
-        self.rdv = if len_sq > f32::EPSILON { 1.0 / len_sq } else { 0.0 };
+        self.rdv = if len_sq > f32::EPSILON {
+            1.0 / len_sq
+        } else {
+            0.0
+        };
     }
 }
 
@@ -100,7 +108,11 @@ impl Transformable for LineSegment {
         self.p1 = mat.transform_point3(self.p1);
         self.dir = p2 - self.p1;
         let len_sq = self.dir.dot(self.dir);
-        self.rdv = if len_sq > f32::EPSILON { 1.0 / len_sq } else { 0.0 };
+        self.rdv = if len_sq > f32::EPSILON {
+            1.0 / len_sq
+        } else {
+            0.0
+        };
     }
 }
 
@@ -130,7 +142,11 @@ impl Stretchable for LineSegment {
 
         // Non-parallel: parallelogram
         let normal = cross.normalize();
-        let up = if normal.y.abs() < 0.9 { Vec3::Y } else { Vec3::X };
+        let up = if normal.y.abs() < 0.9 {
+            Vec3::Y
+        } else {
+            Vec3::X
+        };
         let u_axis = normal.cross(up).normalize();
         let v_axis = u_axis.cross(normal);
 
@@ -142,10 +158,13 @@ impl Stretchable for LineSegment {
             self.p1 + translation,
         ];
 
-        let verts_2d: Vec<[f32; 2]> = corners.iter().map(|&c| {
-            let d = c - center;
-            [d.dot(u_axis), d.dot(v_axis)]
-        }).collect();
+        let verts_2d: Vec<[f32; 2]> = corners
+            .iter()
+            .map(|&c| {
+                let d = c - center;
+                [d.dot(u_axis), d.dot(v_axis)]
+            })
+            .collect();
 
         LineSegmentStretch::Polygon(ConvexPolygon::with_axes(
             center, normal, u_axis, v_axis, verts_2d,
@@ -212,9 +231,12 @@ impl Collides<ConvexPolytope> for LineSegment {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, polytope: &ConvexPolytope) -> bool {
         super::line_polytope_collides(
-            self.p1, self.dir,
-            &polytope.planes, &polytope.obb,
-            T_MIN, T_MAX,
+            self.p1,
+            self.dir,
+            &polytope.planes,
+            &polytope.obb,
+            T_MIN,
+            T_MAX,
         )
     }
 }
@@ -230,9 +252,12 @@ impl<const P: usize, const V: usize> Collides<ArrayConvexPolytope<P, V>> for Lin
     #[inline]
     fn test<const BROADPHASE: bool>(&self, polytope: &ArrayConvexPolytope<P, V>) -> bool {
         super::line_polytope_collides(
-            self.p1, self.dir,
-            &polytope.planes, &polytope.obb,
-            T_MIN, T_MAX,
+            self.p1,
+            self.dir,
+            &polytope.planes,
+            &polytope.obb,
+            T_MIN,
+            T_MAX,
         )
     }
 }
@@ -275,4 +300,3 @@ impl Collides<LineSegment> for ConvexPolygon {
         seg.test::<BROADPHASE>(self)
     }
 }
-

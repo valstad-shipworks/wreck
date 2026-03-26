@@ -2,11 +2,11 @@ use glam::Vec3;
 
 use inherent::inherent;
 
+use super::refer::RefConvexPolytope;
+use crate::ConvexPolytope;
 use crate::cuboid::Cuboid;
 use crate::sphere::Sphere;
 use crate::{Collides, Scalable, Stretchable, Transformable};
-use crate::ConvexPolytope;
-use super::refer::RefConvexPolytope;
 
 /// A convex polytope defined by half-planes and vertices, using const generics
 /// so it can be constructed and stored in `const` / `static` contexts.
@@ -29,7 +29,10 @@ impl<const P: usize, const V: usize> ArrayConvexPolytope<P, V> {
         let mut i = 0;
         while i < P {
             let (n, d) = planes[i];
-            debug_assert!(crate::dot(n, n) >= f32::EPSILON, "Plane normal cannot be zero");
+            debug_assert!(
+                crate::dot(n, n) >= f32::EPSILON,
+                "Plane normal cannot be zero"
+            );
             debug_assert!(d >= 0.0, "Plane distance cannot be negative");
             i += 1;
         }
@@ -43,7 +46,11 @@ impl<const P: usize, const V: usize> ArrayConvexPolytope<P, V> {
             debug_assert!(obb.contains_point(v), "Vertex cannot be outside the OBB");
             i += 1;
         }
-        Self { planes, vertices, obb }
+        Self {
+            planes,
+            vertices,
+            obb,
+        }
     }
 
     #[inline]
@@ -165,7 +172,8 @@ impl<const P: usize, const V: usize, const P2: usize, const V2: usize>
 {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, other: &ArrayConvexPolytope<P2, V2>) -> bool {
-        self.as_ref().collides_polytope::<BROADPHASE>(&other.as_ref())
+        self.as_ref()
+            .collides_polytope::<BROADPHASE>(&other.as_ref())
     }
 }
 
@@ -173,11 +181,7 @@ impl<const P: usize, const V: usize> Stretchable for ArrayConvexPolytope<P, V> {
     type Output = ConvexPolytope;
 
     fn stretch(&self, translation: Vec3) -> Self::Output {
-        let heap = ConvexPolytope::with_obb(
-            self.planes.to_vec(),
-            self.vertices.to_vec(),
-            self.obb,
-        );
+        let heap = ConvexPolytope::with_obb(self.planes.to_vec(), self.vertices.to_vec(), self.obb);
         heap.stretch(translation)
     }
 }

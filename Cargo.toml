@@ -1,6 +1,6 @@
 [package]
 name = "wreck"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["Bowan Foryt <bowan@valstad.com>"]
@@ -10,9 +10,11 @@ repository = "https://github.com/valstad-shipworks/wreck"
 [features]
 debug-wreck-assert = []
 wreck-assert = []
+approx = ["dep:approx", "glam/approx"]
 
 [dependencies]
 glam = "0.32.1"
+approx = { version = "0.5", optional = true }
 wide = "1.2.0"
 inherent = "1.0.13"
 aligned-vec = "0.6.4"

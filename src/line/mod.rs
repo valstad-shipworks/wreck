@@ -23,8 +23,12 @@ use crate::sphere::Sphere;
 /// Closest t on parametric line to a point, clamped to [t_min, t_max].
 #[inline]
 pub(crate) fn closest_t_to_point(
-    origin: Vec3, dir: Vec3, rdv: f32,
-    point: Vec3, t_min: f32, t_max: f32,
+    origin: Vec3,
+    dir: Vec3,
+    rdv: f32,
+    point: Vec3,
+    t_min: f32,
+    t_max: f32,
 ) -> f32 {
     let diff = point - origin;
     let t = diff.dot(dir) * rdv;
@@ -34,8 +38,12 @@ pub(crate) fn closest_t_to_point(
 /// Does the parametric line collide with a sphere?
 #[inline]
 pub(crate) fn line_sphere_collides(
-    origin: Vec3, dir: Vec3, rdv: f32,
-    sphere: &Sphere, t_min: f32, t_max: f32,
+    origin: Vec3,
+    dir: Vec3,
+    rdv: f32,
+    sphere: &Sphere,
+    t_min: f32,
+    t_max: f32,
 ) -> bool {
     let t = closest_t_to_point(origin, dir, rdv, sphere.center, t_min, t_max);
     let closest = origin + dir * t;
@@ -46,20 +54,24 @@ pub(crate) fn line_sphere_collides(
 /// Does the parametric line collide with a capsule?
 #[inline]
 pub(crate) fn line_capsule_collides(
-    origin: Vec3, dir: Vec3,
-    capsule: &Capsule, t_min: f32, t_max: f32,
+    origin: Vec3,
+    dir: Vec3,
+    capsule: &Capsule,
+    t_min: f32,
+    t_max: f32,
 ) -> bool {
-    let dist_sq = crate::clamped_line_segment_dist_sq(
-        origin, dir, t_min, t_max,
-        capsule.p1, capsule.dir,
-    );
+    let dist_sq =
+        crate::clamped_line_segment_dist_sq(origin, dir, t_min, t_max, capsule.p1, capsule.dir);
     dist_sq <= capsule.radius * capsule.radius
 }
 
 /// Slab test: does parametric line intersect cuboid?
 pub(crate) fn line_cuboid_collides(
-    origin: Vec3, dir: Vec3,
-    cuboid: &Cuboid, t_min: f32, t_max: f32,
+    origin: Vec3,
+    dir: Vec3,
+    cuboid: &Cuboid,
+    t_min: f32,
+    t_max: f32,
 ) -> bool {
     let d = origin - cuboid.center;
     let mut t_near = t_min;
@@ -90,9 +102,12 @@ pub(crate) fn line_cuboid_collides(
 
 /// Cyrus-Beck clip: does parametric line intersect convex polytope?
 pub(crate) fn line_polytope_collides(
-    origin: Vec3, dir: Vec3,
-    planes: &[(Vec3, f32)], obb: &Cuboid,
-    t_min: f32, t_max: f32,
+    origin: Vec3,
+    dir: Vec3,
+    planes: &[(Vec3, f32)],
+    obb: &Cuboid,
+    t_min: f32,
+    t_max: f32,
 ) -> bool {
     // Broadphase: slab test against OBB
     if !line_cuboid_collides(origin, dir, obb, t_min, t_max) {
@@ -127,8 +142,11 @@ pub(crate) fn line_polytope_collides(
 /// Does parametric line collide with infinite half-space n·x <= d?
 #[inline]
 pub(crate) fn line_infinite_plane_collides(
-    origin: Vec3, dir: Vec3,
-    plane: &Plane, t_min: f32, t_max: f32,
+    origin: Vec3,
+    dir: Vec3,
+    plane: &Plane,
+    t_min: f32,
+    t_max: f32,
 ) -> bool {
     let n_dot_o = plane.normal.dot(origin);
     let n_dot_d = plane.normal.dot(dir);
@@ -155,45 +173,63 @@ use crate::Collides;
 
 impl Collides<Line> for Line {
     #[inline]
-    fn test<const BROADPHASE: bool>(&self, _other: &Line) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &Line) -> bool {
+        false
+    }
 }
 
 impl Collides<Ray> for Ray {
     #[inline]
-    fn test<const BROADPHASE: bool>(&self, _other: &Ray) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &Ray) -> bool {
+        false
+    }
 }
 
 impl Collides<LineSegment> for LineSegment {
     #[inline]
-    fn test<const BROADPHASE: bool>(&self, _other: &LineSegment) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &LineSegment) -> bool {
+        false
+    }
 }
 
 impl Collides<Ray> for Line {
     #[inline]
-    fn test<const BROADPHASE: bool>(&self, _other: &Ray) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &Ray) -> bool {
+        false
+    }
 }
 
 impl Collides<Line> for Ray {
     #[inline]
-    fn test<const BROADPHASE: bool>(&self, _other: &Line) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &Line) -> bool {
+        false
+    }
 }
 
 impl Collides<LineSegment> for Line {
     #[inline]
-    fn test<const BROADPHASE: bool>(&self, _other: &LineSegment) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &LineSegment) -> bool {
+        false
+    }
 }
 
 impl Collides<Line> for LineSegment {
     #[inline]
-    fn test<const BROADPHASE: bool>(&self, _other: &Line) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &Line) -> bool {
+        false
+    }
 }
 
 impl Collides<LineSegment> for Ray {
     #[inline]
-    fn test<const BROADPHASE: bool>(&self, _other: &LineSegment) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &LineSegment) -> bool {
+        false
+    }
 }
 
 impl Collides<Ray> for LineSegment {
     #[inline]
-    fn test<const BROADPHASE: bool>(&self, _other: &Ray) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &Ray) -> bool {
+        false
+    }
 }

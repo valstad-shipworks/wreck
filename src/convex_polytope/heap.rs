@@ -2,14 +2,14 @@ use glam::Vec3;
 
 use inherent::inherent;
 
-use crate::wreck_assert;
-use crate::{Bounded, Collides, Scalable, Stretchable, Transformable};
+use super::refer::RefConvexPolytope;
+use super::*;
 use crate::cuboid::Cuboid;
 use crate::sphere::Sphere;
-use super::*;
-use super::refer::RefConvexPolytope;
+use crate::wreck_assert;
+use crate::{Bounded, Collides, Scalable, Stretchable, Transformable};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ConvexPolytope {
     pub planes: Vec<(Vec3, f32)>,
     pub vertices: Vec<Vec3>,
@@ -18,17 +18,37 @@ pub struct ConvexPolytope {
 
 impl ConvexPolytope {
     pub fn new(planes: Vec<(Vec3, f32)>, vertices: Vec<Vec3>) -> Self {
-        wreck_assert!(!planes.is_empty(), "ConvexPolytope must have at least one plane");
-        wreck_assert!(!vertices.is_empty(), "ConvexPolytope must have at least one vertex");
+        wreck_assert!(
+            !planes.is_empty(),
+            "ConvexPolytope must have at least one plane"
+        );
+        wreck_assert!(
+            !vertices.is_empty(),
+            "ConvexPolytope must have at least one vertex"
+        );
         let obb = compute_obb(&vertices);
-        Self { planes, vertices, obb }
+        Self {
+            planes,
+            vertices,
+            obb,
+        }
     }
 
     /// Construct with a precomputed OBB, skipping the expensive Jacobi eigenvalue iteration.
     pub fn with_obb(planes: Vec<(Vec3, f32)>, vertices: Vec<Vec3>, obb: Cuboid) -> Self {
-        wreck_assert!(!planes.is_empty(), "ConvexPolytope must have at least one plane");
-        wreck_assert!(!vertices.is_empty(), "ConvexPolytope must have at least one vertex");
-        Self { planes, vertices, obb }
+        wreck_assert!(
+            !planes.is_empty(),
+            "ConvexPolytope must have at least one plane"
+        );
+        wreck_assert!(
+            !vertices.is_empty(),
+            "ConvexPolytope must have at least one vertex"
+        );
+        Self {
+            planes,
+            vertices,
+            obb,
+        }
     }
 
     #[inline]
@@ -159,7 +179,8 @@ impl Collides<crate::capsule::Capsule> for ConvexPolytope {
 impl Collides<ConvexPolytope> for ConvexPolytope {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, other: &ConvexPolytope) -> bool {
-        self.as_ref().collides_polytope::<BROADPHASE>(&other.as_ref())
+        self.as_ref()
+            .collides_polytope::<BROADPHASE>(&other.as_ref())
     }
 }
 
@@ -176,9 +197,11 @@ impl Stretchable for ConvexPolytope {
         }
 
         // For each original plane (n, d): new d = d + max(0, n·translation)
-        let mut planes: Vec<(Vec3, f32)> = self.planes.iter().map(|&(n, d)| {
-            (n, d + n.dot(translation).max(0.0))
-        }).collect();
+        let mut planes: Vec<(Vec3, f32)> = self
+            .planes
+            .iter()
+            .map(|&(n, d)| (n, d + n.dot(translation).max(0.0)))
+            .collect();
 
         // Add side planes from silhouette edges: pairs of adjacent faces
         // that straddle the translation direction.

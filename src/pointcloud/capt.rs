@@ -1,5 +1,5 @@
 //! # Collision-Affording Point Trees: SIMD-Amenable Nearest Neighbors for Fast Collision Checking
-//! 
+//!
 //! This is copied from https://github.com/oh-yes-0-fps/capt/tree/non-nightly
 //!
 //! This is a Rust implementation of the _collision-affording point tree_ (CAPT), a data structure
@@ -82,7 +82,7 @@ use core::{
     ops::{Add, Sub},
 };
 
-use wide::{f32x8, i32x8, CmpGe, CmpLe};
+use wide::{CmpGe, CmpLe, f32x8, i32x8};
 
 /// A generic trait representing values which may be used as an "axis;" that is, elements of a
 /// vector representing a point.
@@ -209,7 +209,6 @@ macro_rules! impl_axis {
                 self * self
             }
         }
-
     };
 }
 
@@ -823,8 +822,7 @@ where
         let aabb_f32 = unsafe {
             core::slice::from_raw_parts(self.aabbs.as_ptr().cast::<f32>(), self.aabbs.len() * 2 * K)
         };
-        let all_true: f32x8 =
-            unsafe { core::mem::transmute::<i32x8, f32x8>(i32x8::splat(-1_i32)) };
+        let all_true: f32x8 = unsafe { core::mem::transmute::<i32x8, f32x8>(i32x8::splat(-1_i32)) };
         let mut inbounds = all_true;
         for k in 0..K {
             let lo_vals = f32x8::new(core::array::from_fn(|j| unsafe {
@@ -845,10 +843,14 @@ where
         let inbounds_arr: [i32; 8] =
             unsafe { core::mem::transmute::<f32x8, i32x8>(inbounds) }.to_array();
         let starts: [usize; 8] = core::array::from_fn(|j| unsafe {
-            self.starts[zs_arr[j] as usize].try_into().unwrap_unchecked()
+            self.starts[zs_arr[j] as usize]
+                .try_into()
+                .unwrap_unchecked()
         });
         let ends: [usize; 8] = core::array::from_fn(|j| unsafe {
-            self.starts[zs_arr[j] as usize + 1].try_into().unwrap_unchecked()
+            self.starts[zs_arr[j] as usize + 1]
+                .try_into()
+                .unwrap_unchecked()
         });
 
         let centers_arr: [[f32; 8]; K] = core::array::from_fn(|k| centers[k].to_array());
@@ -860,8 +862,7 @@ where
             }
             let start = starts[j];
             let end = ends[j];
-            let n_center: [f32x8; K] =
-                core::array::from_fn(|k| f32x8::splat(centers_arr[k][j]));
+            let n_center: [f32x8; K] = core::array::from_fn(|k| f32x8::splat(centers_arr[k][j]));
             let rs = f32x8::splat(radii_arr[j]);
             let rs_sq = rs * rs;
             let mut i = start;

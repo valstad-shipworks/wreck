@@ -169,8 +169,12 @@ impl<'a> RefConvexPolygon<'a> {
             let j = (i + 1) % n;
             let edge_dir = self.vertices_3d[j] - self.vertices_3d[i];
             let d = crate::clamped_line_segment_dist_sq(
-                origin, dir, t_min, t_max,
-                self.vertices_3d[i], edge_dir,
+                origin,
+                dir,
+                t_min,
+                t_max,
+                self.vertices_3d[i],
+                edge_dir,
             );
             min_dist_sq = min_dist_sq.min(d);
         }
@@ -325,10 +329,7 @@ pub(crate) fn ref_polygon_infinite_plane_collides(
     crate::convex_polytope::min_projection(polygon.vertices_3d, plane.normal) <= plane.d
 }
 
-pub(crate) fn ref_polygon_polygon_collides(
-    a: &RefConvexPolygon,
-    b: &RefConvexPolygon,
-) -> bool {
+pub(crate) fn ref_polygon_polygon_collides(a: &RefConvexPolygon, b: &RefConvexPolygon) -> bool {
     let d = b.center - a.center;
     let max_r = a.bounding_radius + b.bounding_radius;
     if d.dot(d) > max_r * max_r {

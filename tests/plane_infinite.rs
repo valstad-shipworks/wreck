@@ -32,11 +32,7 @@ fn sphere_below_plane() {
 #[test]
 fn capsule_above_plane() {
     let plane = ground_plane();
-    let c = Capsule::new(
-        Vec3::new(-1.0, 2.0, 0.0),
-        Vec3::new(1.0, 2.0, 0.0),
-        0.3,
-    );
+    let c = Capsule::new(Vec3::new(-1.0, 2.0, 0.0), Vec3::new(1.0, 2.0, 0.0), 0.3);
     assert!(!plane.collides(&c));
     assert!(!c.collides(&plane));
 }
@@ -44,11 +40,7 @@ fn capsule_above_plane() {
 #[test]
 fn capsule_crossing_plane() {
     let plane = ground_plane();
-    let c = Capsule::new(
-        Vec3::new(0.0, 1.0, 0.0),
-        Vec3::new(0.0, -1.0, 0.0),
-        0.1,
-    );
+    let c = Capsule::new(Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, -1.0, 0.0), 0.1);
     assert!(plane.collides(&c));
     assert!(c.collides(&plane));
 }
@@ -56,11 +48,7 @@ fn capsule_crossing_plane() {
 #[test]
 fn capsule_near_plane() {
     let plane = ground_plane();
-    let c = Capsule::new(
-        Vec3::new(-1.0, 0.2, 0.0),
-        Vec3::new(1.0, 0.2, 0.0),
-        0.3,
-    );
+    let c = Capsule::new(Vec3::new(-1.0, 0.2, 0.0), Vec3::new(1.0, 0.2, 0.0), 0.3);
     assert!(plane.collides(&c));
 }
 
@@ -232,11 +220,7 @@ fn plane_collides_many_capsules() {
     let capsules: Vec<Capsule> = (0..20)
         .map(|i| {
             let y = -5.0 + i as f32 * 0.6;
-            Capsule::new(
-                Vec3::new(-1.0, y, 0.0),
-                Vec3::new(1.0, y, 0.0),
-                0.1,
-            )
+            Capsule::new(Vec3::new(-1.0, y, 0.0), Vec3::new(1.0, y, 0.0), 0.1)
         })
         .collect();
 

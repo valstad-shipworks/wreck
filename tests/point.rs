@@ -56,15 +56,22 @@ fn point_cuboid_on_surface() {
 #[test]
 fn point_polytope_inside() {
     let planes = vec![
-        (Vec3::X, 1.0), (Vec3::NEG_X, 1.0),
-        (Vec3::Y, 1.0), (Vec3::NEG_Y, 1.0),
-        (Vec3::Z, 1.0), (Vec3::NEG_Z, 1.0),
+        (Vec3::X, 1.0),
+        (Vec3::NEG_X, 1.0),
+        (Vec3::Y, 1.0),
+        (Vec3::NEG_Y, 1.0),
+        (Vec3::Z, 1.0),
+        (Vec3::NEG_Z, 1.0),
     ];
     let vertices = vec![
-        Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0),
-        Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, 1.0, -1.0),
-        Vec3::new(-1.0, 1.0, -1.0), Vec3::new(1.0, -1.0, 1.0),
-        Vec3::new(-1.0, 1.0, 1.0), Vec3::new(1.0, -1.0, -1.0),
+        Vec3::new(-1.0, -1.0, -1.0),
+        Vec3::new(1.0, 1.0, 1.0),
+        Vec3::new(-1.0, -1.0, 1.0),
+        Vec3::new(1.0, 1.0, -1.0),
+        Vec3::new(-1.0, 1.0, -1.0),
+        Vec3::new(1.0, -1.0, 1.0),
+        Vec3::new(-1.0, 1.0, 1.0),
+        Vec3::new(1.0, -1.0, -1.0),
     ];
     let poly = ConvexPolytope::new(planes, vertices);
     let p = Point(Vec3::ZERO);
@@ -75,15 +82,22 @@ fn point_polytope_inside() {
 #[test]
 fn point_polytope_outside() {
     let planes = vec![
-        (Vec3::X, 1.0), (Vec3::NEG_X, 1.0),
-        (Vec3::Y, 1.0), (Vec3::NEG_Y, 1.0),
-        (Vec3::Z, 1.0), (Vec3::NEG_Z, 1.0),
+        (Vec3::X, 1.0),
+        (Vec3::NEG_X, 1.0),
+        (Vec3::Y, 1.0),
+        (Vec3::NEG_Y, 1.0),
+        (Vec3::Z, 1.0),
+        (Vec3::NEG_Z, 1.0),
     ];
     let vertices = vec![
-        Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0),
-        Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, 1.0, -1.0),
-        Vec3::new(-1.0, 1.0, -1.0), Vec3::new(1.0, -1.0, 1.0),
-        Vec3::new(-1.0, 1.0, 1.0), Vec3::new(1.0, -1.0, -1.0),
+        Vec3::new(-1.0, -1.0, -1.0),
+        Vec3::new(1.0, 1.0, 1.0),
+        Vec3::new(-1.0, -1.0, 1.0),
+        Vec3::new(1.0, 1.0, -1.0),
+        Vec3::new(-1.0, 1.0, -1.0),
+        Vec3::new(1.0, -1.0, 1.0),
+        Vec3::new(-1.0, 1.0, 1.0),
+        Vec3::new(1.0, -1.0, -1.0),
     ];
     let poly = ConvexPolytope::new(planes, vertices);
     let p = Point(Vec3::new(5.0, 0.0, 0.0));

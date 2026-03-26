@@ -5,7 +5,7 @@ pub(crate) mod refer;
 use glam::Vec3;
 use wide::f32x8;
 
-use crate::{Capsule, Cuboid, ConvexPolytope, Sphere, convex_polytope::array::ArrayConvexPolytope};
+use crate::{Capsule, ConvexPolytope, Cuboid, Sphere, convex_polytope::array::ArrayConvexPolytope};
 
 /// SIMD max projection of vertices onto a normal direction.
 #[inline]
@@ -34,11 +34,15 @@ pub(crate) fn max_projection(vertices: &[Vec3], normal: Vec3) -> f32 {
     let arr = max_val.to_array();
     let mut result = arr[0];
     for &v in &arr[1..] {
-        if v > result { result = v; }
+        if v > result {
+            result = v;
+        }
     }
     for v in remainder {
         let p = normal.dot(*v);
-        if p > result { result = p; }
+        if p > result {
+            result = p;
+        }
     }
     result
 }
@@ -70,11 +74,15 @@ pub(crate) fn min_projection(vertices: &[Vec3], normal: Vec3) -> f32 {
     let arr = min_val.to_array();
     let mut result = arr[0];
     for &v in &arr[1..] {
-        if v < result { result = v; }
+        if v < result {
+            result = v;
+        }
     }
     for v in remainder {
         let p = normal.dot(*v);
-        if p < result { result = p; }
+        if p < result {
+            result = p;
+        }
     }
     result
 }
@@ -192,25 +200,22 @@ fn jacobi_eigenvectors_3x3(mut a: [[f32; 3]; 3]) -> [Vec3; 3] {
     ]
 }
 
-
 use crate::Collides;
 use refer::RefConvexPolytope;
 
-impl<const P: usize, const V: usize> Collides<ConvexPolytope>
-    for ArrayConvexPolytope<P, V>
-{
+impl<const P: usize, const V: usize> Collides<ConvexPolytope> for ArrayConvexPolytope<P, V> {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, other: &ConvexPolytope) -> bool {
-        RefConvexPolytope::from_array(self).collides_polytope::<BROADPHASE>(&RefConvexPolytope::from_heap(other))
+        RefConvexPolytope::from_array(self)
+            .collides_polytope::<BROADPHASE>(&RefConvexPolytope::from_heap(other))
     }
 }
 
-impl<const P: usize, const V: usize> Collides<ArrayConvexPolytope<P, V>>
-    for ConvexPolytope
-{
+impl<const P: usize, const V: usize> Collides<ArrayConvexPolytope<P, V>> for ConvexPolytope {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, other: &ArrayConvexPolytope<P, V>) -> bool {
-        RefConvexPolytope::from_heap(self).collides_polytope::<BROADPHASE>(&RefConvexPolytope::from_array(other))
+        RefConvexPolytope::from_heap(self)
+            .collides_polytope::<BROADPHASE>(&RefConvexPolytope::from_array(other))
     }
 }
 
@@ -225,20 +230,42 @@ impl From<Sphere> for ConvexPolytope {
 
         // 12 icosahedron vertices (normalized to unit sphere)
         let ico = [
-            Vec3::new(-a,  b, 0.0), Vec3::new( a,  b, 0.0),
-            Vec3::new(-a, -b, 0.0), Vec3::new( a, -b, 0.0),
-            Vec3::new(0.0, -a,  b), Vec3::new(0.0,  a,  b),
-            Vec3::new(0.0, -a, -b), Vec3::new(0.0,  a, -b),
-            Vec3::new( b, 0.0, -a), Vec3::new( b, 0.0,  a),
-            Vec3::new(-b, 0.0, -a), Vec3::new(-b, 0.0,  a),
+            Vec3::new(-a, b, 0.0),
+            Vec3::new(a, b, 0.0),
+            Vec3::new(-a, -b, 0.0),
+            Vec3::new(a, -b, 0.0),
+            Vec3::new(0.0, -a, b),
+            Vec3::new(0.0, a, b),
+            Vec3::new(0.0, -a, -b),
+            Vec3::new(0.0, a, -b),
+            Vec3::new(b, 0.0, -a),
+            Vec3::new(b, 0.0, a),
+            Vec3::new(-b, 0.0, -a),
+            Vec3::new(-b, 0.0, a),
         ];
 
         // 20 icosahedron faces (indices)
         let faces: [[usize; 3]; 20] = [
-            [0,11,5],  [0,5,1],   [0,1,7],   [0,7,10],  [0,10,11],
-            [1,5,9],   [5,11,4],  [11,10,2],  [10,7,6],  [7,1,8],
-            [3,9,4],   [3,4,2],   [3,2,6],   [3,6,8],   [3,8,9],
-            [4,9,5],   [2,4,11],  [6,2,10],  [8,6,7],   [9,8,1],
+            [0, 11, 5],
+            [0, 5, 1],
+            [0, 1, 7],
+            [0, 7, 10],
+            [0, 10, 11],
+            [1, 5, 9],
+            [5, 11, 4],
+            [11, 10, 2],
+            [10, 7, 6],
+            [7, 1, 8],
+            [3, 9, 4],
+            [3, 4, 2],
+            [3, 2, 6],
+            [3, 6, 8],
+            [3, 8, 9],
+            [4, 9, 5],
+            [2, 4, 11],
+            [6, 2, 10],
+            [8, 6, 7],
+            [9, 8, 1],
         ];
 
         // Subdivide once: each face -> 4 faces, project midpoints onto unit sphere
@@ -249,11 +276,7 @@ impl From<Sphere> for ConvexPolytope {
         let mut vert_map = std::collections::HashMap::new();
         let mut get_or_insert = |v: Vec3, verts: &mut Vec<Vec3>| -> usize {
             // Quantize to avoid floating point duplicates
-            let key = (
-                (v.x * 1e5) as i32,
-                (v.y * 1e5) as i32,
-                (v.z * 1e5) as i32,
-            );
+            let key = ((v.x * 1e5) as i32, (v.y * 1e5) as i32, (v.z * 1e5) as i32);
             *vert_map.entry(key).or_insert_with(|| {
                 let idx = verts.len();
                 verts.push(v);
@@ -300,7 +323,10 @@ impl From<Sphere> for ConvexPolytope {
         }
 
         // Scale and translate vertices
-        let scaled_verts: Vec<Vec3> = vertices.iter().map(|v| sphere.center + *v * sphere.radius).collect();
+        let scaled_verts: Vec<Vec3> = vertices
+            .iter()
+            .map(|v| sphere.center + *v * sphere.radius)
+            .collect();
 
         // Build planes: for each normal, d = n·center + radius (since vertices are on the sphere surface)
         let planes: Vec<(Vec3, f32)> = normals_set
@@ -325,12 +351,30 @@ impl From<Cuboid> for ConvexPolytope {
     fn from(cuboid: Cuboid) -> Self {
         // 6 face normals (positive and negative for each axis)
         let planes = vec![
-            ( cuboid.axes[0], cuboid.axes[0].dot(cuboid.center) + cuboid.half_extents[0]),
-            (-cuboid.axes[0], (-cuboid.axes[0]).dot(cuboid.center) + cuboid.half_extents[0]),
-            ( cuboid.axes[1], cuboid.axes[1].dot(cuboid.center) + cuboid.half_extents[1]),
-            (-cuboid.axes[1], (-cuboid.axes[1]).dot(cuboid.center) + cuboid.half_extents[1]),
-            ( cuboid.axes[2], cuboid.axes[2].dot(cuboid.center) + cuboid.half_extents[2]),
-            (-cuboid.axes[2], (-cuboid.axes[2]).dot(cuboid.center) + cuboid.half_extents[2]),
+            (
+                cuboid.axes[0],
+                cuboid.axes[0].dot(cuboid.center) + cuboid.half_extents[0],
+            ),
+            (
+                -cuboid.axes[0],
+                (-cuboid.axes[0]).dot(cuboid.center) + cuboid.half_extents[0],
+            ),
+            (
+                cuboid.axes[1],
+                cuboid.axes[1].dot(cuboid.center) + cuboid.half_extents[1],
+            ),
+            (
+                -cuboid.axes[1],
+                (-cuboid.axes[1]).dot(cuboid.center) + cuboid.half_extents[1],
+            ),
+            (
+                cuboid.axes[2],
+                cuboid.axes[2].dot(cuboid.center) + cuboid.half_extents[2],
+            ),
+            (
+                -cuboid.axes[2],
+                (-cuboid.axes[2]).dot(cuboid.center) + cuboid.half_extents[2],
+            ),
         ];
 
         // 8 corner vertices
@@ -386,7 +430,9 @@ impl From<Capsule> for ConvexPolytope {
             vertices.push(p1 + (ax_u * cos_a + ax_v * sin_a) * r);
             // 45-degree ring toward back pole
             let lat = std::f32::consts::FRAC_PI_4;
-            vertices.push(p1 - ax_fwd * (r * lat.sin()) + (ax_u * cos_a + ax_v * sin_a) * (r * lat.cos()));
+            vertices.push(
+                p1 - ax_fwd * (r * lat.sin()) + (ax_u * cos_a + ax_v * sin_a) * (r * lat.cos()),
+            );
         }
 
         // Hemisphere vertices at p2 (forward hemisphere)
@@ -398,13 +444,15 @@ impl From<Capsule> for ConvexPolytope {
             vertices.push(p2 + (ax_u * cos_a + ax_v * sin_a) * r);
             // 45-degree ring toward front pole
             let lat = std::f32::consts::FRAC_PI_4;
-            vertices.push(p2 + ax_fwd * (r * lat.sin()) + (ax_u * cos_a + ax_v * sin_a) * (r * lat.cos()));
+            vertices.push(
+                p2 + ax_fwd * (r * lat.sin()) + (ax_u * cos_a + ax_v * sin_a) * (r * lat.cos()),
+            );
         }
 
         // Build planes from unique outward normals
         // End caps
         let mut planes: Vec<(Vec3, f32)> = vec![
-            ( ax_fwd, ax_fwd.dot(p2) + r),
+            (ax_fwd, ax_fwd.dot(p2) + r),
             (-ax_fwd, (-ax_fwd).dot(p1) + r),
         ];
 

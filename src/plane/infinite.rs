@@ -14,7 +14,7 @@ use crate::{Collides, ConvexPolytope, Scalable, Stretchable, Transformable};
 /// opposite to the normal is considered solid.
 ///
 /// `normal` must be unit-length.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Plane {
     pub normal: Vec3,
     pub d: f32,
@@ -160,7 +160,11 @@ impl Collides<Plane> for Cuboid {
 // ---------------------------------------------------------------------------
 
 #[inline]
-fn plane_polytope_collides_ref<const BROADPHASE: bool>(plane: &Plane, vertices: &[Vec3], obb: &Cuboid) -> bool {
+fn plane_polytope_collides_ref<const BROADPHASE: bool>(
+    plane: &Plane,
+    vertices: &[Vec3],
+    obb: &Cuboid,
+) -> bool {
     if BROADPHASE && !plane_cuboid_collides(plane, obb) {
         return false;
     }
@@ -212,4 +216,3 @@ impl Collides<Plane> for Plane {
         self.d + other.d >= 0.0
     }
 }
-

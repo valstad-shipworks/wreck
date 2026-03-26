@@ -14,7 +14,7 @@ const T_MIN: f32 = 0.0;
 const T_MAX: f32 = f32::INFINITY;
 
 /// A ray: `origin + t * dir` for `t ∈ [0, ∞)`.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Ray {
     pub origin: Vec3,
     pub dir: Vec3,
@@ -23,12 +23,19 @@ pub struct Ray {
 
 impl Ray {
     pub fn new(origin: Vec3, dir: Vec3) -> Self {
-        wreck_assert!(dir.dot(dir) > f32::EPSILON, "Ray direction must be non-zero");
+        wreck_assert!(
+            dir.dot(dir) > f32::EPSILON,
+            "Ray direction must be non-zero"
+        );
         let len_sq = dir.dot(dir);
         Self {
             origin,
             dir,
-            rdv: if len_sq > f32::EPSILON { 1.0 / len_sq } else { 0.0 },
+            rdv: if len_sq > f32::EPSILON {
+                1.0 / len_sq
+            } else {
+                0.0
+            },
         }
     }
 }
@@ -38,7 +45,11 @@ impl Scalable for Ray {
     pub fn scale(&mut self, factor: f32) {
         self.dir *= factor;
         let len_sq = self.dir.dot(self.dir);
-        self.rdv = if len_sq > f32::EPSILON { 1.0 / len_sq } else { 0.0 };
+        self.rdv = if len_sq > f32::EPSILON {
+            1.0 / len_sq
+        } else {
+            0.0
+        };
     }
 }
 
@@ -95,7 +106,11 @@ impl Stretchable for Ray {
         let far = dir_norm * INF;
 
         let normal = cross.normalize();
-        let up = if normal.y.abs() < 0.9 { Vec3::Y } else { Vec3::X };
+        let up = if normal.y.abs() < 0.9 {
+            Vec3::Y
+        } else {
+            Vec3::X
+        };
         let u_axis = normal.cross(up).normalize();
         let v_axis = u_axis.cross(normal);
 
@@ -107,10 +122,13 @@ impl Stretchable for Ray {
         ];
 
         let center = self.origin + far * 0.5 + translation * 0.5;
-        let verts_2d: Vec<[f32; 2]> = corners.iter().map(|&c| {
-            let d = c - center;
-            [d.dot(u_axis), d.dot(v_axis)]
-        }).collect();
+        let verts_2d: Vec<[f32; 2]> = corners
+            .iter()
+            .map(|&c| {
+                let d = c - center;
+                [d.dot(u_axis), d.dot(v_axis)]
+            })
+            .collect();
 
         RayStretch::Polygon(ConvexPolygon::with_axes(
             center, normal, u_axis, v_axis, verts_2d,
@@ -172,9 +190,12 @@ impl Collides<ConvexPolytope> for Ray {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, polytope: &ConvexPolytope) -> bool {
         super::line_polytope_collides(
-            self.origin, self.dir,
-            &polytope.planes, &polytope.obb,
-            T_MIN, T_MAX,
+            self.origin,
+            self.dir,
+            &polytope.planes,
+            &polytope.obb,
+            T_MIN,
+            T_MAX,
         )
     }
 }
@@ -190,9 +211,12 @@ impl<const P: usize, const V: usize> Collides<ArrayConvexPolytope<P, V>> for Ray
     #[inline]
     fn test<const BROADPHASE: bool>(&self, polytope: &ArrayConvexPolytope<P, V>) -> bool {
         super::line_polytope_collides(
-            self.origin, self.dir,
-            &polytope.planes, &polytope.obb,
-            T_MIN, T_MAX,
+            self.origin,
+            self.dir,
+            &polytope.planes,
+            &polytope.obb,
+            T_MIN,
+            T_MAX,
         )
     }
 }
@@ -235,4 +259,3 @@ impl Collides<Ray> for ConvexPolygon {
         ray.test::<BROADPHASE>(self)
     }
 }
-

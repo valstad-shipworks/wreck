@@ -1,7 +1,5 @@
 use glam::Vec3;
-use wreck::{
-    Capsule, Collides, ConvexPolygon, ConvexPolytope, Cuboid, Plane, Sphere,
-};
+use wreck::{Capsule, Collides, ConvexPolygon, ConvexPolytope, Cuboid, Plane, Sphere};
 
 fn unit_square() -> ConvexPolygon {
     // 2x2 square on the XZ plane at y=0, normal = Y
@@ -59,11 +57,7 @@ fn sphere_polygon_hit_corner() {
 fn capsule_polygon_through() {
     let poly = unit_square();
     // Capsule passing through the polygon
-    let c = Capsule::new(
-        Vec3::new(0.0, 1.0, 0.0),
-        Vec3::new(0.0, -1.0, 0.0),
-        0.1,
-    );
+    let c = Capsule::new(Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, -1.0, 0.0), 0.1);
     assert!(poly.collides(&c));
     assert!(c.collides(&poly));
 }
@@ -72,11 +66,7 @@ fn capsule_polygon_through() {
 fn capsule_polygon_parallel_above() {
     let poly = unit_square();
     // Capsule parallel to polygon, too far above
-    let c = Capsule::new(
-        Vec3::new(-1.0, 2.0, 0.0),
-        Vec3::new(1.0, 2.0, 0.0),
-        0.1,
-    );
+    let c = Capsule::new(Vec3::new(-1.0, 2.0, 0.0), Vec3::new(1.0, 2.0, 0.0), 0.1);
     assert!(!poly.collides(&c));
 }
 
@@ -84,22 +74,14 @@ fn capsule_polygon_parallel_above() {
 fn capsule_polygon_near_edge() {
     let poly = unit_square();
     // Capsule near edge but within radius
-    let c = Capsule::new(
-        Vec3::new(-0.5, 0.1, 0.0),
-        Vec3::new(0.5, 0.1, 0.0),
-        0.2,
-    );
+    let c = Capsule::new(Vec3::new(-0.5, 0.1, 0.0), Vec3::new(0.5, 0.1, 0.0), 0.2);
     assert!(poly.collides(&c));
 }
 
 #[test]
 fn cuboid_polygon_overlapping() {
     let poly = unit_square();
-    let c = Cuboid::new(
-        Vec3::ZERO,
-        [Vec3::X, Vec3::Y, Vec3::Z],
-        [0.5, 0.5, 0.5],
-    );
+    let c = Cuboid::new(Vec3::ZERO, [Vec3::X, Vec3::Y, Vec3::Z], [0.5, 0.5, 0.5]);
     assert!(poly.collides(&c));
     assert!(c.collides(&poly));
 }
@@ -177,10 +159,7 @@ fn polytope_polygon_miss() {
             (Vec3::Z, 5.5),
             (Vec3::NEG_Z, -4.5),
         ],
-        vec![
-            Vec3::new(4.5, 4.5, 4.5),
-            Vec3::new(5.5, 5.5, 5.5),
-        ],
+        vec![Vec3::new(4.5, 4.5, 4.5), Vec3::new(5.5, 5.5, 5.5)],
     );
     assert!(!poly.collides(&cube));
 }

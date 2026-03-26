@@ -1,13 +1,12 @@
 use glam::Vec3;
-use wide::{f32x8, CmpGt};
+use wide::{CmpGt, f32x8};
 
 use crate::capsule::Capsule;
+use crate::convex_polytope::array::ArrayConvexPolytope;
 use crate::cuboid::Cuboid;
 use crate::point::Point;
 use crate::sphere::Sphere;
 use crate::{Collides, ConvexPolytope};
-use crate::convex_polytope::array::ArrayConvexPolytope;
-
 
 #[derive(Debug, Clone)]
 pub struct RefConvexPolytope<'a> {
@@ -19,12 +18,22 @@ pub struct RefConvexPolytope<'a> {
 impl<'a> RefConvexPolytope<'a> {
     #[inline]
     pub fn from_heap(heap: &'a ConvexPolytope) -> Self {
-        RefConvexPolytope { planes: &heap.planes, vertices: &heap.vertices, obb: &heap.obb }
+        RefConvexPolytope {
+            planes: &heap.planes,
+            vertices: &heap.vertices,
+            obb: &heap.obb,
+        }
     }
 
     #[inline]
-    pub fn from_array<const P: usize, const V: usize>(array: &'a ArrayConvexPolytope<P, V>) -> Self {
-        RefConvexPolytope { planes: &array.planes, vertices: &array.vertices, obb: &array.obb }
+    pub fn from_array<const P: usize, const V: usize>(
+        array: &'a ArrayConvexPolytope<P, V>,
+    ) -> Self {
+        RefConvexPolytope {
+            planes: &array.planes,
+            vertices: &array.vertices,
+            obb: &array.obb,
+        }
     }
 }
 
@@ -37,21 +46,31 @@ fn gather_planes(chunk: &[(Vec3, f32)]) -> (f32x8, f32x8, f32x8, f32x8) {
     let mut nx = [0.0f32; 8];
     let mut ny = [0.0f32; 8];
     let mut nz = [0.0f32; 8];
-    let mut d  = [0.0f32; 8];
+    let mut d = [0.0f32; 8];
     for (i, &(normal, dist)) in chunk.iter().enumerate() {
         nx[i] = normal.x;
         ny[i] = normal.y;
         nz[i] = normal.z;
-        d[i]  = dist;
+        d[i] = dist;
     }
-    (f32x8::new(nx), f32x8::new(ny), f32x8::new(nz), f32x8::new(d))
+    (
+        f32x8::new(nx),
+        f32x8::new(ny),
+        f32x8::new(nz),
+        f32x8::new(d),
+    )
 }
 
 /// Dot product of 8 plane normals (SoA) with a single point, minus d.
 #[inline]
 fn dot8_minus_d(
-    nx: f32x8, ny: f32x8, nz: f32x8, d: f32x8,
-    px: f32x8, py: f32x8, pz: f32x8,
+    nx: f32x8,
+    ny: f32x8,
+    nz: f32x8,
+    d: f32x8,
+    px: f32x8,
+    py: f32x8,
+    pz: f32x8,
 ) -> f32x8 {
     nx * px + ny * py + nz * pz - d
 }
@@ -70,7 +89,7 @@ impl RefConvexPolytope<'_> {
         let cx = f32x8::splat(sphere.center.x);
         let cy = f32x8::splat(sphere.center.y);
         let cz = f32x8::splat(sphere.center.z);
-        let r  = f32x8::splat(sphere.radius);
+        let r = f32x8::splat(sphere.radius);
         let zero = f32x8::ZERO;
 
         let chunks = self.planes.chunks_exact(8);
@@ -120,8 +139,7 @@ impl RefConvexPolytope<'_> {
         for chunk in chunks {
             let (nx, ny, nz, d) = gather_planes(chunk);
             let center_proj = nx * cx + ny * cy + nz * cz;
-            let extent_proj =
-                  (nx * ax0 + ny * ay0 + nz * az0).abs() * h0
+            let extent_proj = (nx * ax0 + ny * ay0 + nz * az0).abs() * h0
                 + (nx * ax1 + ny * ay1 + nz * az1).abs() * h1
                 + (nx * ax2 + ny * ay2 + nz * az2).abs() * h2;
             let sep = center_proj - extent_proj - d;
@@ -158,7 +176,7 @@ impl RefConvexPolytope<'_> {
         let p2x = f32x8::splat(p2.x);
         let p2y = f32x8::splat(p2.y);
         let p2z = f32x8::splat(p2.z);
-        let r   = f32x8::splat(capsule.radius);
+        let r = f32x8::splat(capsule.radius);
         let zero = f32x8::ZERO;
 
         let chunks = self.planes.chunks_exact(8);
@@ -215,7 +233,10 @@ impl RefConvexPolytope<'_> {
     }
 
     #[inline]
-    pub(crate) fn collides_polytope<const BROADPHASE: bool>(&self, other: &RefConvexPolytope<'_>) -> bool {
+    pub(crate) fn collides_polytope<const BROADPHASE: bool>(
+        &self,
+        other: &RefConvexPolytope<'_>,
+    ) -> bool {
         // Broadphase: OBB vs OBB
         if BROADPHASE && !self.obb.collides(other.obb) {
             return false;

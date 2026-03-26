@@ -27,8 +27,12 @@ pub(crate) use wreck_assert;
 /// and segment (p2 + t*d2, t ∈ [0, 1]). Returns squared distance.
 #[inline]
 pub(crate) fn clamped_line_segment_dist_sq(
-    p1: glam::Vec3, d1: glam::Vec3, s_min: f32, s_max: f32,
-    p2: glam::Vec3, d2: glam::Vec3,
+    p1: glam::Vec3,
+    d1: glam::Vec3,
+    s_min: f32,
+    s_max: f32,
+    p2: glam::Vec3,
+    d2: glam::Vec3,
 ) -> f32 {
     let r = p1 - p2;
     let a = d1.dot(d1);
@@ -83,4 +87,3 @@ pub(crate) fn clamped_line_segment_dist_sq(
 pub(crate) const fn dot(a: glam::Vec3, b: glam::Vec3) -> f32 {
     a.x * b.x + a.y * b.y + a.z * b.z
 }
-

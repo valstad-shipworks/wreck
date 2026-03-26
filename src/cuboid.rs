@@ -9,7 +9,7 @@ use crate::wreck_assert;
 use crate::{Bounded, Collides, Scalable, Transformable};
 use crate::{ConvexPolytope, Stretchable};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Cuboid {
     pub center: Vec3,
     pub axes: [Vec3; 3],

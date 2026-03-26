@@ -1,7 +1,6 @@
 use glam::Vec3;
 use wreck::{
-    Capsule, Collides, ConvexPolygon, ConvexPolytope, Cuboid, Plane, Line, LineSegment,
-    Ray, Sphere,
+    Capsule, Collides, ConvexPolygon, ConvexPolytope, Cuboid, Line, LineSegment, Plane, Ray, Sphere,
 };
 
 // ---------------------------------------------------------------------------
@@ -64,13 +63,18 @@ fn line_polytope_hit() {
     let l = Line::new(Vec3::new(0.0, 0.0, -5.0), Vec3::Z);
     let poly = ConvexPolytope::new(
         vec![
-            (Vec3::X, 1.0), (Vec3::NEG_X, 1.0),
-            (Vec3::Y, 1.0), (Vec3::NEG_Y, 1.0),
-            (Vec3::Z, 1.0), (Vec3::NEG_Z, 1.0),
+            (Vec3::X, 1.0),
+            (Vec3::NEG_X, 1.0),
+            (Vec3::Y, 1.0),
+            (Vec3::NEG_Y, 1.0),
+            (Vec3::Z, 1.0),
+            (Vec3::NEG_Z, 1.0),
         ],
         vec![
-            Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0),
-            Vec3::new(-1.0, -1.0, 1.0), Vec3::new(1.0, 1.0, -1.0),
+            Vec3::new(-1.0, -1.0, -1.0),
+            Vec3::new(1.0, 1.0, 1.0),
+            Vec3::new(-1.0, -1.0, 1.0),
+            Vec3::new(1.0, 1.0, -1.0),
         ],
     );
     assert!(l.collides(&poly));
@@ -91,7 +95,10 @@ fn line_infinite_plane() {
 #[test]
 fn line_convex_polygon() {
     let poly = ConvexPolygon::with_axes(
-        Vec3::ZERO, Vec3::Y, Vec3::X, Vec3::NEG_Z,
+        Vec3::ZERO,
+        Vec3::Y,
+        Vec3::X,
+        Vec3::NEG_Z,
         vec![[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]],
     );
     // Line through center of polygon
@@ -200,7 +207,10 @@ fn ray_infinite_plane() {
 #[test]
 fn ray_convex_polygon() {
     let poly = ConvexPolygon::with_axes(
-        Vec3::ZERO, Vec3::Y, Vec3::X, Vec3::NEG_Z,
+        Vec3::ZERO,
+        Vec3::Y,
+        Vec3::X,
+        Vec3::NEG_Z,
         vec![[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]],
     );
     // Ray from above, hitting polygon
@@ -297,7 +307,10 @@ fn segment_infinite_plane() {
 #[test]
 fn segment_convex_polygon() {
     let poly = ConvexPolygon::with_axes(
-        Vec3::ZERO, Vec3::Y, Vec3::X, Vec3::NEG_Z,
+        Vec3::ZERO,
+        Vec3::Y,
+        Vec3::X,
+        Vec3::NEG_Z,
         vec![[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]],
     );
     // Segment through polygon

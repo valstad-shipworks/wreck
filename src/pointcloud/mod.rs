@@ -16,6 +16,7 @@ use crate::capsule::Capsule;
 use crate::convex_polytope::array::ArrayConvexPolytope;
 use crate::convex_polytope::refer::RefConvexPolytope;
 use crate::cuboid::Cuboid;
+use crate::cylinder::Cylinder;
 use crate::line::{Line, LineSegment, Ray};
 use crate::plane::ConvexPolygon;
 use crate::plane::Plane;
@@ -383,12 +384,110 @@ impl Collides<Pointcloud> for Cuboid {
     }
 }
 
+impl Collides<Cylinder> for Pointcloud {
+    fn test<const BROADPHASE: bool>(&self, cyl: &Cylinder) -> bool {
+        let transformed;
+        let cyl = if let Some(inv) = &self.inverse_transform {
+            transformed = {
+                let mut c = *cyl;
+                c.transform(*inv);
+                c
+            };
+            &transformed
+        } else {
+            cyl
+        };
+        let (bc, br) = cyl.bounding_sphere();
+        if BROADPHASE {
+            if !self.tree.collides(&bc.to_array(), br) {
+                return false;
+            }
+        }
+
+        let r_total = cyl.radius + self.point_radius;
+        let r_total_sq = r_total * r_total;
+
+        let p1x8 = f32x8::splat(cyl.p1.x);
+        let p1y8 = f32x8::splat(cyl.p1.y);
+        let p1z8 = f32x8::splat(cyl.p1.z);
+        let dx8 = f32x8::splat(cyl.dir.x);
+        let dy8 = f32x8::splat(cyl.dir.y);
+        let dz8 = f32x8::splat(cyl.dir.z);
+        let rdv8 = f32x8::splat(cyl.rdv);
+        let zero = f32x8::splat(0.0);
+        let one = f32x8::splat(1.0);
+        let r_total_sq8 = f32x8::splat(r_total_sq);
+        let cyl_r_sq8 = f32x8::splat(cyl.radius * cyl.radius);
+        let pt_r_sq8 = f32x8::splat(self.point_radius * self.point_radius);
+        let dir_sq8 = f32x8::splat(cyl.dir.dot(cyl.dir));
+        let four_cyl_r_sq = f32x8::splat(4.0 * cyl.radius * cyl.radius);
+
+        let full_chunks = self.full_chunks();
+        for i in 0..full_chunks {
+            let base = i * 8;
+            let px = f32x8::new(self.spheres.x[base..base + 8].try_into().unwrap());
+            let py = f32x8::new(self.spheres.y[base..base + 8].try_into().unwrap());
+            let pz = f32x8::new(self.spheres.z[base..base + 8].try_into().unwrap());
+
+            let wx = px - p1x8;
+            let wy = py - p1y8;
+            let wz = pz - p1z8;
+
+            let t = (wx * dx8 + wy * dy8 + wz * dz8) * rdv8;
+            let t_c = t.max(zero).min(one);
+
+            let perpx = wx - dx8 * t;
+            let perpy = wy - dy8 * t;
+            let perpz = wz - dz8 * t;
+            let r_sq = perpx * perpx + perpy * perpy + perpz * perpz;
+
+            // Barrel
+            let in_barrel = zero.simd_le(t) & t.simd_le(one);
+            let barrel_hit = in_barrel & r_sq.simd_le(r_total_sq8);
+
+            // End cap
+            let t_excess = t - t_c;
+            let d_axial_sq = t_excess * t_excess * dir_sq8;
+
+            let inside_r = r_sq.simd_le(cyl_r_sq8);
+            let endcap_inside = inside_r & d_axial_sq.simd_le(pt_r_sq8);
+
+            let l = r_sq + cyl_r_sq8 + d_axial_sq - pt_r_sq8;
+            let endcap_outside = l.simd_le(zero) | (l * l).simd_le(four_cyl_r_sq * r_sq);
+
+            let not_barrel = !in_barrel;
+            let hit = barrel_hit | (not_barrel & (endcap_inside | endcap_outside));
+            if hit.any() {
+                return true;
+            }
+        }
+
+        for i in self.remainder_start()..self.point_count() {
+            let p = Vec3::new(self.spheres.x[i], self.spheres.y[i], self.spheres.z[i]);
+            if cyl.point_dist_sq(p) <= self.point_radius * self.point_radius {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+impl Collides<Pointcloud> for Cylinder {
+    #[inline]
+    fn test<const BROADPHASE: bool>(&self, other: &Pointcloud) -> bool {
+        other.test::<BROADPHASE>(self)
+    }
+}
+
 // ConvexPolytope-Pointcloud: CAPT broadphase + SIMD half-plane containment narrowphase
 impl Pointcloud {
     /// SIMD narrowphase: test 8 cloud points at a time against all half-planes.
     /// A point is inside the polytope if `n·p - d - point_radius <= 0` for ALL planes.
     /// We track `max_sep` per point across planes; if any point's max_sep <= 0, it's inside.
-    fn collides_polytope_ref<const BROADPHASE: bool>(&self, polytope: &RefConvexPolytope<'_>) -> bool {
+    fn collides_polytope_ref<const BROADPHASE: bool>(
+        &self,
+        polytope: &RefConvexPolytope<'_>,
+    ) -> bool {
         // Broadphase: polytope OBB bounding sphere vs CAPT
         if BROADPHASE {
             let br = polytope.obb.bounding_sphere_radius();
@@ -649,7 +748,10 @@ impl_line_pcl!(Line, f32::NEG_INFINITY, f32::INFINITY);
 impl_line_pcl!(Ray, 0.0, f32::INFINITY);
 impl_line_pcl!(LineSegment, 0.0, 1.0);
 
-pub trait PointCloudMarker: __private::Sealed + Sized + Clone + Debug + Transformable + Scalable + Bounded {}
+pub trait PointCloudMarker:
+    __private::Sealed + Sized + Clone + Debug + Transformable + Scalable + Bounded
+{
+}
 
 impl __private::Sealed for Pointcloud {}
 impl PointCloudMarker for Pointcloud {}

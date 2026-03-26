@@ -7,7 +7,8 @@ use rand::rngs::SmallRng;
 use std::hint::black_box;
 
 use wreck::{
-    Capsule, Collides, ConvexPolygon, Cuboid, Line, LineSegment, Plane, Point, Ray, Sphere,
+    Capsule, Collides, ConvexPolygon, Cuboid, Cylinder, Line, LineSegment, Plane, Point, Ray,
+    Sphere,
 };
 
 fn rand_vec3(rng: &mut SmallRng, range: f32) -> Vec3 {
@@ -61,6 +62,12 @@ fn rand_aabb(rng: &mut SmallRng) -> Cuboid {
         rng.random_range(0.2..1.5),
     ];
     Cuboid::new(center, [Vec3::X, Vec3::Y, Vec3::Z], he)
+}
+
+fn rand_cylinder(rng: &mut SmallRng) -> Cylinder {
+    let p1 = rand_vec3(rng, 5.0);
+    let p2 = p1 + rand_vec3(rng, 2.0);
+    Cylinder::new(p1, p2, rng.random_range(0.1..0.5))
 }
 
 fn rand_convex_polygon(rng: &mut SmallRng) -> ConvexPolygon {
@@ -1137,6 +1144,148 @@ fn bench_stretch_infinite_plane(c: &mut Criterion) {
     });
 }
 
+fn bench_sphere_cylinder(c: &mut Criterion) {
+    let mut rng = SmallRng::seed_from_u64(42);
+    let pairs: Vec<_> = (0..N_PAIRS)
+        .map(|_| (rand_sphere(&mut rng), rand_cylinder(&mut rng)))
+        .collect();
+
+    c.bench_function("sphere_cylinder", |b| {
+        b.iter(|| {
+            let mut count = 0u32;
+            for (s, cyl) in &pairs {
+                if black_box(s).collides(black_box(cyl)) {
+                    count += 1;
+                }
+            }
+            count
+        })
+    });
+}
+
+fn bench_capsule_cylinder(c: &mut Criterion) {
+    let mut rng = SmallRng::seed_from_u64(42);
+    let pairs: Vec<_> = (0..N_PAIRS)
+        .map(|_| (rand_capsule(&mut rng), rand_cylinder(&mut rng)))
+        .collect();
+
+    c.bench_function("capsule_cylinder", |b| {
+        b.iter(|| {
+            let mut count = 0u32;
+            for (cap, cyl) in &pairs {
+                if black_box(cap).collides(black_box(cyl)) {
+                    count += 1;
+                }
+            }
+            count
+        })
+    });
+}
+
+fn bench_cylinder_cuboid(c: &mut Criterion) {
+    let mut rng = SmallRng::seed_from_u64(42);
+    let pairs: Vec<_> = (0..N_PAIRS)
+        .map(|_| (rand_cylinder(&mut rng), rand_cuboid(&mut rng)))
+        .collect();
+
+    c.bench_function("cylinder_cuboid", |b| {
+        b.iter(|| {
+            let mut count = 0u32;
+            for (cyl, cb) in &pairs {
+                if black_box(cyl).collides(black_box(cb)) {
+                    count += 1;
+                }
+            }
+            count
+        })
+    });
+}
+
+fn bench_cylinder_cylinder(c: &mut Criterion) {
+    let mut rng = SmallRng::seed_from_u64(42);
+    let pairs: Vec<_> = (0..N_PAIRS)
+        .map(|_| (rand_cylinder(&mut rng), rand_cylinder(&mut rng)))
+        .collect();
+
+    c.bench_function("cylinder_cylinder", |b| {
+        b.iter(|| {
+            let mut count = 0u32;
+            for (a, b_c) in &pairs {
+                if black_box(a).collides(black_box(b_c)) {
+                    count += 1;
+                }
+            }
+            count
+        })
+    });
+}
+
+fn bench_plane_cylinder(c: &mut Criterion) {
+    let mut rng = SmallRng::seed_from_u64(42);
+    let pairs: Vec<_> = (0..N_PAIRS)
+        .map(|_| (rand_infinite_plane(&mut rng), rand_cylinder(&mut rng)))
+        .collect();
+
+    c.bench_function("plane_cylinder", |b| {
+        b.iter(|| {
+            let mut count = 0u32;
+            for (pl, cyl) in &pairs {
+                if black_box(pl).collides(black_box(cyl)) {
+                    count += 1;
+                }
+            }
+            count
+        })
+    });
+}
+
+fn bench_segment_cylinder(c: &mut Criterion) {
+    let mut rng = SmallRng::seed_from_u64(42);
+    let pairs: Vec<_> = (0..N_PAIRS)
+        .map(|_| (rand_line_segment(&mut rng), rand_cylinder(&mut rng)))
+        .collect();
+
+    c.bench_function("segment_cylinder", |b| {
+        b.iter(|| {
+            let mut count = 0u32;
+            for (seg, cyl) in &pairs {
+                if black_box(seg).collides(black_box(cyl)) {
+                    count += 1;
+                }
+            }
+            count
+        })
+    });
+}
+
+fn bench_point_cylinder(c: &mut Criterion) {
+    let mut rng = SmallRng::seed_from_u64(42);
+    let pairs: Vec<_> = (0..N_PAIRS)
+        .map(|_| {
+            (
+                Point::new(
+                    rng.random_range(-5.0..5.0),
+                    rng.random_range(-5.0..5.0),
+                    rng.random_range(-5.0..5.0),
+                ),
+                rand_cylinder(&mut rng),
+            )
+        })
+        .collect();
+
+    c.bench_function("point_cylinder", |b| {
+        b.iter(|| {
+            let mut count = 0u32;
+            for (p, cyl) in &pairs {
+                if black_box(p).collides(black_box(cyl)) {
+                    count += 1;
+                }
+            }
+            count
+        })
+    });
+}
+
 // Primitive collision benchmarks (always available)
 criterion_group!(
     primitive_benches,
@@ -1167,6 +1316,13 @@ criterion_group!(
     bench_segment_sphere,
     bench_ray_cuboid,
     bench_segment_polygon,
+    bench_sphere_cylinder,
+    bench_capsule_cylinder,
+    bench_cylinder_cuboid,
+    bench_cylinder_cylinder,
+    bench_plane_cylinder,
+    bench_segment_cylinder,
+    bench_point_cylinder,
 );
 
 // Polytope benchmarks (behind feature flag)

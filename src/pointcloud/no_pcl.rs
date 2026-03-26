@@ -1,9 +1,8 @@
 use crate::convex_polytope::array::ArrayConvexPolytope;
 use crate::{Bounded, Collides, Cuboid, Scalable, Sphere, Stretchable, Transformable};
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct NoPcl;
-
 
 macro_rules! impl_collides_nopcl {
     ($($ty:ty),* $(,)?) => {$(
@@ -22,6 +21,7 @@ impl_collides_nopcl!(
     crate::Sphere,
     crate::Cuboid,
     crate::Capsule,
+    crate::Cylinder,
     crate::Point,
     crate::Plane,
     crate::ConvexPolygon,

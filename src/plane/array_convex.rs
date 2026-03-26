@@ -63,7 +63,10 @@ impl<const V: usize> ArrayConvexPolygon<V> {
         vertices_2d: [[f32; 2]; V],
     ) -> Self {
         debug_assert!(V >= 3, "Polygon must have at least 3 vertices");
-        debug_assert!(crate::dot(normal, normal) >= f32::EPSILON, "Normal cannot be zero");
+        debug_assert!(
+            crate::dot(normal, normal) >= f32::EPSILON,
+            "Normal cannot be zero"
+        );
 
         // Check CCW winding (positive signed area)
         let mut area2 = 0.0f32;

@@ -2,13 +2,13 @@ use glam::Vec3;
 
 use inherent::inherent;
 
-use crate::{Bounded, Collides, Stretchable, Transformable, Scalable};
-use crate::line::LineSegment;
 use crate::capsule::Capsule;
 use crate::cuboid::Cuboid;
+use crate::line::LineSegment;
 use crate::sphere::Sphere;
+use crate::{Bounded, Collides, Scalable, Stretchable, Transformable};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Point(pub Vec3);
 
 impl Point {
@@ -119,7 +119,8 @@ impl Collides<Point> for Cuboid {
 impl Collides<crate::ConvexPolytope> for Point {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, polytope: &crate::ConvexPolytope) -> bool {
-        crate::convex_polytope::refer::RefConvexPolytope::from_heap(polytope).collides_point::<BROADPHASE>(self)
+        crate::convex_polytope::refer::RefConvexPolytope::from_heap(polytope)
+            .collides_point::<BROADPHASE>(self)
     }
 }
 
@@ -142,50 +143,70 @@ impl Collides<Point> for Point {
 
 impl Collides<crate::Plane> for Point {
     #[inline]
-    fn test<const BROADPHASE: bool>(&self, _other: &crate::Plane) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &crate::Plane) -> bool {
+        false
+    }
 }
 
 impl Collides<Point> for crate::Plane {
     #[inline]
-    fn test<const BROADPHASE: bool>(&self, _other: &Point) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &Point) -> bool {
+        false
+    }
 }
 
 impl Collides<crate::ConvexPolygon> for Point {
     #[inline]
-    fn test<const BROADPHASE: bool>(&self, _other: &crate::ConvexPolygon) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &crate::ConvexPolygon) -> bool {
+        false
+    }
 }
 
 impl Collides<Point> for crate::ConvexPolygon {
     #[inline]
-    fn test<const BROADPHASE: bool>(&self, _other: &Point) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &Point) -> bool {
+        false
+    }
 }
 
 impl Collides<crate::Line> for Point {
     #[inline]
-    fn test<const BROADPHASE: bool>(&self, _other: &crate::Line) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &crate::Line) -> bool {
+        false
+    }
 }
 
 impl Collides<Point> for crate::Line {
     #[inline]
-    fn test<const BROADPHASE: bool>(&self, _other: &Point) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &Point) -> bool {
+        false
+    }
 }
 
 impl Collides<crate::Ray> for Point {
     #[inline]
-    fn test<const BROADPHASE: bool>(&self, _other: &crate::Ray) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &crate::Ray) -> bool {
+        false
+    }
 }
 
 impl Collides<Point> for crate::Ray {
     #[inline]
-    fn test<const BROADPHASE: bool>(&self, _other: &Point) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &Point) -> bool {
+        false
+    }
 }
 
 impl Collides<LineSegment> for Point {
     #[inline]
-    fn test<const BROADPHASE: bool>(&self, _other: &LineSegment) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &LineSegment) -> bool {
+        false
+    }
 }
 
 impl Collides<Point> for LineSegment {
     #[inline]
-    fn test<const BROADPHASE: bool>(&self, _other: &Point) -> bool { false }
+    fn test<const BROADPHASE: bool>(&self, _other: &Point) -> bool {
+        false
+    }
 }

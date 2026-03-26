@@ -2,16 +2,15 @@ use glam::Vec3;
 
 use inherent::inherent;
 
+use super::Plane;
+use super::ref_convex::{
+    RefConvexPolygon, ref_polygon_capsule_collides, ref_polygon_cuboid_collides,
+    ref_polygon_infinite_plane_collides, ref_polygon_polygon_collides,
+    ref_polygon_polytope_collides, ref_polygon_sphere_collides,
+};
 use crate::capsule::Capsule;
 use crate::convex_polytope::array::ArrayConvexPolytope;
 use crate::cuboid::Cuboid;
-use super::Plane;
-use super::ref_convex::{
-    RefConvexPolygon,
-    ref_polygon_sphere_collides, ref_polygon_capsule_collides,
-    ref_polygon_cuboid_collides, ref_polygon_polytope_collides,
-    ref_polygon_infinite_plane_collides, ref_polygon_polygon_collides,
-};
 use crate::sphere::Sphere;
 use crate::wreck_assert;
 use crate::{Bounded, Collides, ConvexPolytope, Scalable, Stretchable, Transformable};
@@ -23,7 +22,7 @@ use crate::{Bounded, Collides, ConvexPolytope, Scalable, Stretchable, Transforma
 /// The polygon has zero thickness. `normal` must be unit-length.
 /// 2D vertices must be in counter-clockwise order when viewed from the
 /// normal direction. If provided clockwise, the constructor reverses them.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ConvexPolygon {
     pub center: Vec3,
     pub normal: Vec3,
@@ -38,7 +37,11 @@ pub struct ConvexPolygon {
 }
 
 fn make_tangent_frame(normal: Vec3) -> (Vec3, Vec3) {
-    let up = if normal.y.abs() < 0.9 { Vec3::Y } else { Vec3::X };
+    let up = if normal.y.abs() < 0.9 {
+        Vec3::Y
+    } else {
+        Vec3::X
+    };
     let u = normal.cross(up).normalize();
     let v = u.cross(normal);
     (u, v)
@@ -57,15 +60,20 @@ impl ConvexPolygon {
         v_axis: Vec3,
         mut vertices_2d: Vec<[f32; 2]>,
     ) -> Self {
-        wreck_assert!(vertices_2d.len() >= 3, "Polygon must have at least 3 vertices");
-        wreck_assert!(normal.dot(normal) > f32::EPSILON, "Polygon normal must be non-zero");
+        wreck_assert!(
+            vertices_2d.len() >= 3,
+            "Polygon must have at least 3 vertices"
+        );
+        wreck_assert!(
+            normal.dot(normal) > f32::EPSILON,
+            "Polygon normal must be non-zero"
+        );
         // Ensure CCW winding (positive signed area)
         let mut area2 = 0.0f32;
         let n = vertices_2d.len();
         for i in 0..n {
             let j = (i + 1) % n;
-            area2 += vertices_2d[i][0] * vertices_2d[j][1]
-                - vertices_2d[j][0] * vertices_2d[i][1];
+            area2 += vertices_2d[i][0] * vertices_2d[j][1] - vertices_2d[j][0] * vertices_2d[i][1];
         }
         if area2 < 0.0 {
             vertices_2d.reverse();
@@ -128,8 +136,15 @@ impl ConvexPolygon {
         self.as_ref().point_dist_sq(point)
     }
 
-    pub(crate) fn parametric_line_dist_sq(&self, origin: Vec3, dir: Vec3, t_min: f32, t_max: f32) -> f32 {
-        self.as_ref().parametric_line_dist_sq(origin, dir, t_min, t_max)
+    pub(crate) fn parametric_line_dist_sq(
+        &self,
+        origin: Vec3,
+        dir: Vec3,
+        t_min: f32,
+        t_max: f32,
+    ) -> f32 {
+        self.as_ref()
+            .parametric_line_dist_sq(origin, dir, t_min, t_max)
     }
 }
 
@@ -302,7 +317,11 @@ impl Stretchable for ConvexPolygon {
 
 /// 2D convex hull (Andrew's monotone chain). Returns CCW-ordered vertices.
 fn convex_hull_2d(points: &mut Vec<[f32; 2]>) -> Vec<[f32; 2]> {
-    points.sort_by(|a, b| a[0].partial_cmp(&b[0]).unwrap().then(a[1].partial_cmp(&b[1]).unwrap()));
+    points.sort_by(|a, b| {
+        a[0].partial_cmp(&b[0])
+            .unwrap()
+            .then(a[1].partial_cmp(&b[1]).unwrap())
+    });
     points.dedup_by(|a, b| (a[0] - b[0]).abs() < 1e-7 && (a[1] - b[1]).abs() < 1e-7);
     let n = points.len();
     if n <= 2 {
@@ -316,8 +335,8 @@ fn convex_hull_2d(points: &mut Vec<[f32; 2]>) -> Vec<[f32; 2]> {
         while hull.len() >= 2 {
             let a: [f32; 2] = hull[hull.len() - 2];
             let b: [f32; 2] = hull[hull.len() - 1];
-            let cross = (b[0] - a[0]) * (points[i][1] - a[1])
-                - (b[1] - a[1]) * (points[i][0] - a[0]);
+            let cross =
+                (b[0] - a[0]) * (points[i][1] - a[1]) - (b[1] - a[1]) * (points[i][0] - a[0]);
             if cross <= 0.0 {
                 hull.pop();
             } else {
@@ -333,8 +352,8 @@ fn convex_hull_2d(points: &mut Vec<[f32; 2]>) -> Vec<[f32; 2]> {
         while hull.len() >= lower_len {
             let a: [f32; 2] = hull[hull.len() - 2];
             let b: [f32; 2] = hull[hull.len() - 1];
-            let cross = (b[0] - a[0]) * (points[i][1] - a[1])
-                - (b[1] - a[1]) * (points[i][0] - a[0]);
+            let cross =
+                (b[0] - a[0]) * (points[i][1] - a[1]) - (b[1] - a[1]) * (points[i][0] - a[0]);
             if cross <= 0.0 {
                 hull.pop();
             } else {
@@ -409,7 +428,12 @@ impl Collides<ConvexPolygon> for Cuboid {
 impl Collides<ConvexPolytope> for ConvexPolygon {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, polytope: &ConvexPolytope) -> bool {
-        ref_polygon_polytope_collides(&self.as_ref(), &polytope.planes, &polytope.vertices, &polytope.obb)
+        ref_polygon_polytope_collides(
+            &self.as_ref(),
+            &polytope.planes,
+            &polytope.vertices,
+            &polytope.obb,
+        )
     }
 }
 
@@ -423,7 +447,12 @@ impl Collides<ConvexPolygon> for ConvexPolytope {
 impl<const P: usize, const V: usize> Collides<ArrayConvexPolytope<P, V>> for ConvexPolygon {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, polytope: &ArrayConvexPolytope<P, V>) -> bool {
-        ref_polygon_polytope_collides(&self.as_ref(), &polytope.planes, &polytope.vertices, &polytope.obb)
+        ref_polygon_polytope_collides(
+            &self.as_ref(),
+            &polytope.planes,
+            &polytope.vertices,
+            &polytope.obb,
+        )
     }
 }
 
@@ -461,4 +490,3 @@ impl Collides<ConvexPolygon> for ConvexPolygon {
         ref_polygon_polygon_collides(&self.as_ref(), &other.as_ref())
     }
 }
-

@@ -2,12 +2,11 @@ use glam::{DVec3, Vec3};
 
 use inherent::inherent;
 
-
 use crate::Stretchable;
-use crate::{Bounded, Capsule, Collides, Cuboid, Scalable, Transformable};
 use crate::wreck_assert;
+use crate::{Bounded, Capsule, Collides, Cuboid, Scalable, Transformable};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Sphere {
     pub center: Vec3,
     pub radius: f32,
@@ -21,7 +20,14 @@ impl Sphere {
 
     pub const fn new_d(center: DVec3, radius: f64) -> Self {
         wreck_assert!(radius >= 0.0, "Sphere radius must be non-negative");
-        Self { center: Vec3 { x: center.x as f32, y: center.y as f32, z: center.z as f32 }, radius: radius as f32 }
+        Self {
+            center: Vec3 {
+                x: center.x as f32,
+                y: center.y as f32,
+                z: center.z as f32,
+            },
+            radius: radius as f32,
+        }
     }
 }
 
@@ -80,11 +86,10 @@ impl Collides<Sphere> for Sphere {
     }
 }
 
-
 #[derive(Debug, Clone, Copy)]
 pub enum SphereStretch {
     NoStretch(Sphere),
-    Stretch(Capsule)
+    Stretch(Capsule),
 }
 
 impl Stretchable for Sphere {
@@ -95,6 +100,10 @@ impl Stretchable for Sphere {
         if dir.length_squared() < f32::EPSILON {
             return SphereStretch::NoStretch(*self);
         }
-        SphereStretch::Stretch(Capsule::new(self.center, self.center + translation, self.radius))
+        SphereStretch::Stretch(Capsule::new(
+            self.center,
+            self.center + translation,
+            self.radius,
+        ))
     }
 }

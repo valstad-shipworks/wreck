@@ -99,6 +99,32 @@ impl SpheresSoA {
         self.len += 1;
     }
 
+    /// Moves all real entries from `other` into `self`, re-padding once.
+    pub fn append(&mut self, other: &mut Self) {
+        if other.len == 0 {
+            return;
+        }
+        // Strip self's padding back to real length
+        self.x.truncate(self.len);
+        self.y.truncate(self.len);
+        self.z.truncate(self.len);
+        self.r.truncate(self.len);
+        // Move real entries from other
+        self.x.extend_from_slice(&other.x[..other.len]);
+        self.y.extend_from_slice(&other.y[..other.len]);
+        self.z.extend_from_slice(&other.z[..other.len]);
+        self.r.extend_from_slice(&other.r[..other.len]);
+        self.len += other.len;
+        // Re-pad to SIMD boundary
+        let padded = pad(self.len);
+        self.x.resize(padded, 0.0);
+        self.y.resize(padded, 0.0);
+        self.z.resize(padded, 0.0);
+        self.r.resize(padded, -1.0);
+        // Clear other
+        other.clear();
+    }
+
     pub fn clear(&mut self) {
         for i in 0..self.len {
             self.r[i] = -1.0;
@@ -482,7 +508,9 @@ mod avx512 {
 
     #[target_feature(enable = "avx512f")]
     pub(super) unsafe fn broadphase_collect_avx512(
-        soa: &SpheresSoA, query: &Sphere, out: &mut [bool],
+        soa: &SpheresSoA,
+        query: &Sphere,
+        out: &mut [bool],
     ) -> bool {
         let cx = _mm512_set1_ps(query.center.x);
         let cy = _mm512_set1_ps(query.center.y);
@@ -726,6 +754,12 @@ where
         }
     }
 
+    /// Moves all items from `other` into `self` in bulk.
+    pub fn append(&mut self, other: &mut Self) {
+        self.items.append(&mut other.items);
+        self.broad.append(&mut other.broad);
+    }
+
     #[inline]
     pub fn len(&self) -> usize {
         self.items.len()
@@ -873,6 +907,7 @@ pub(crate) mod batch {
     use crate::Collides;
     use crate::capsule::Capsule;
     use crate::cuboid::Cuboid;
+    use crate::cylinder::Cylinder;
     use crate::line::{Line, LineSegment, Ray};
     use crate::plane::Plane;
     use crate::sphere::Sphere;
@@ -1102,11 +1137,133 @@ pub(crate) mod batch {
         remainder.iter().any(|c| plane.collides(c))
     }
 
+    // ── Sphere vs Cylinder ────────────────────────────────────────────────
+
+    pub fn sphere_vs_cylinders(sphere: &Sphere, others: &[Cylinder]) -> bool {
+        let cx = f32x8::splat(sphere.center.x);
+        let cy = f32x8::splat(sphere.center.y);
+        let cz = f32x8::splat(sphere.center.z);
+        let sr_sq = f32x8::splat(sphere.radius * sphere.radius);
+        let sr = f32x8::splat(sphere.radius);
+        let zero = f32x8::splat(0.0);
+        let one = f32x8::splat(1.0);
+        let four = f32x8::splat(4.0);
+
+        let chunks = others.chunks_exact(8);
+        let remainder = chunks.remainder();
+
+        for chunk in chunks {
+            let mut p1x = [0.0f32; 8];
+            let mut p1y = [0.0f32; 8];
+            let mut p1z = [0.0f32; 8];
+            let mut dx = [0.0f32; 8];
+            let mut dy = [0.0f32; 8];
+            let mut dz = [0.0f32; 8];
+            let mut rdv = [0.0f32; 8];
+            let mut cr = [0.0f32; 8];
+            let mut dir_sq = [0.0f32; 8];
+            for (i, c) in chunk.iter().enumerate() {
+                p1x[i] = c.p1.x;
+                p1y[i] = c.p1.y;
+                p1z[i] = c.p1.z;
+                dx[i] = c.dir.x;
+                dy[i] = c.dir.y;
+                dz[i] = c.dir.z;
+                rdv[i] = c.rdv;
+                cr[i] = c.radius;
+                dir_sq[i] = c.dir.dot(c.dir);
+            }
+            let p1x = f32x8::new(p1x);
+            let p1y = f32x8::new(p1y);
+            let p1z = f32x8::new(p1z);
+            let dx = f32x8::new(dx);
+            let dy = f32x8::new(dy);
+            let dz = f32x8::new(dz);
+            let rdv = f32x8::new(rdv);
+            let cr = f32x8::new(cr);
+            let dir_sq = f32x8::new(dir_sq);
+
+            let wx = cx - p1x;
+            let wy = cy - p1y;
+            let wz = cz - p1z;
+
+            let t = (wx * dx + wy * dy + wz * dz) * rdv;
+            let t_c = t.max(zero).min(one);
+
+            // Perpendicular distance (using unclamped t)
+            let perpx = wx - dx * t;
+            let perpy = wy - dy * t;
+            let perpz = wz - dz * t;
+            let r_sq = perpx * perpx + perpy * perpy + perpz * perpz;
+
+            // Barrel: t in [0,1], r_sq <= (cyl_r + sphere_r)^2
+            let in_barrel = zero.simd_le(t) & t.simd_le(one);
+            let combined = cr + sr;
+            let barrel_hit = in_barrel & r_sq.simd_le(combined * combined);
+
+            // End cap: axial and radial distance
+            let t_excess = t - t_c;
+            let d_axial_sq = t_excess * t_excess * dir_sq;
+            let cr_sq = cr * cr;
+
+            // End cap, radially inside
+            let inside_r = r_sq.simd_le(cr_sq);
+            let endcap_inside = inside_r & d_axial_sq.simd_le(sr_sq);
+
+            // End cap, radially outside: sqrt-free
+            let l = r_sq + cr_sq + d_axial_sq - sr_sq;
+            let endcap_outside = l.simd_le(zero) | (l * l).simd_le(four * cr_sq * r_sq);
+
+            let not_barrel = !in_barrel;
+            let hit = barrel_hit | (not_barrel & (endcap_inside | endcap_outside));
+            if hit.any() {
+                return true;
+            }
+        }
+
+        remainder.iter().any(|c| sphere.collides(c))
+    }
+
+    // ── Plane vs Cylinder ───────────────────────────────────────────────
+
+    pub fn plane_vs_cylinders(plane: &Plane, others: &[Cylinder]) -> bool {
+        let chunks = others.chunks_exact(8);
+        let remainder = chunks.remainder();
+        let zero = f32x8::ZERO;
+
+        for chunk in chunks {
+            let mut sep_arr = [0.0f32; 8];
+            for (i, c) in chunk.iter().enumerate() {
+                let proj1 = plane.normal.dot(c.p1);
+                let proj2 = plane.normal.dot(c.p1 + c.dir);
+                let min_proj = proj1.min(proj2);
+
+                let dir_sq = c.dir.dot(c.dir);
+                let n_dot_dir = plane.normal.dot(c.dir);
+                let n_perp_sq = if dir_sq > f32::EPSILON {
+                    (1.0 - n_dot_dir * n_dot_dir / dir_sq).max(0.0)
+                } else {
+                    1.0
+                };
+                let disc_extent = c.radius * n_perp_sq.sqrt();
+                sep_arr[i] = min_proj - disc_extent - plane.d;
+            }
+            if f32x8::new(sep_arr).simd_le(zero).any() {
+                return true;
+            }
+        }
+
+        remainder.iter().any(|c| plane.collides(c))
+    }
+
     // ── Line/Ray/Segment vs Sphere ───────────────────────────────────────
 
     fn line_vs_spheres_inner(
-        origin: Vec3, dir: Vec3, rdv: f32,
-        t_min: f32, t_max: f32,
+        origin: Vec3,
+        dir: Vec3,
+        rdv: f32,
+        t_min: f32,
+        t_max: f32,
         others: &[Sphere],
     ) -> bool {
         let ox = f32x8::splat(origin.x);
@@ -1169,7 +1326,14 @@ pub(crate) mod batch {
     }
 
     pub fn line_vs_spheres(line: &Line, others: &[Sphere]) -> bool {
-        line_vs_spheres_inner(line.origin, line.dir, line.rdv, f32::NEG_INFINITY, f32::INFINITY, others)
+        line_vs_spheres_inner(
+            line.origin,
+            line.dir,
+            line.rdv,
+            f32::NEG_INFINITY,
+            f32::INFINITY,
+            others,
+        )
     }
 
     pub fn ray_vs_spheres(ray: &Ray, others: &[Sphere]) -> bool {

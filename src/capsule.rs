@@ -11,7 +11,7 @@ use crate::Cuboid;
 use crate::sphere::Sphere;
 use crate::{Bounded, Collides, Scalable, Transformable};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Capsule {
     pub p1: Vec3,
     pub dir: Vec3,
