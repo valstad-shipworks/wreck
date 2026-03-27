@@ -174,12 +174,23 @@ impl SpheresSoA {
         let cz = f32x8::splat(sphere.center.z);
         let sr = f32x8::splat(sphere.radius);
 
+        let xp = self.x.as_ptr();
+        let yp = self.y.as_ptr();
+        let zp = self.z.as_ptr();
+        let rp = self.r.as_ptr();
+
         for i in 0..self.chunk_count_8() {
             let base = i * 8;
-            let ox = f32x8::new(self.x[base..base + 8].try_into().unwrap());
-            let oy = f32x8::new(self.y[base..base + 8].try_into().unwrap());
-            let oz = f32x8::new(self.z[base..base + 8].try_into().unwrap());
-            let or = f32x8::new(self.r[base..base + 8].try_into().unwrap());
+            let ox;
+            let oy;
+            let oz;
+            let or;
+            unsafe {
+                ox = f32x8::new(*xp.add(base).cast::<[f32; 8]>());
+                oy = f32x8::new(*yp.add(base).cast::<[f32; 8]>());
+                oz = f32x8::new(*zp.add(base).cast::<[f32; 8]>());
+                or = f32x8::new(*rp.add(base).cast::<[f32; 8]>());
+            }
 
             let dx = cx - ox;
             let dy = cy - oy;
@@ -278,19 +289,32 @@ impl SpheresSoA {
 
     fn any_collides_soa_f32x8(&self, other: &SpheresSoA) -> bool {
         let other_chunks = other.chunk_count_8();
+        let oxp = other.x.as_ptr();
+        let oyp = other.y.as_ptr();
+        let ozp = other.z.as_ptr();
+        let orp = other.r.as_ptr();
 
         for i in 0..self.len {
-            let cx = f32x8::splat(self.x[i]);
-            let cy = f32x8::splat(self.y[i]);
-            let cz = f32x8::splat(self.z[i]);
-            let sr = f32x8::splat(self.r[i]);
+            let cx;
+            let cy;
+            let cz;
+            let sr;
+            unsafe {
+                cx = f32x8::splat(*self.x.as_ptr().add(i));
+                cy = f32x8::splat(*self.y.as_ptr().add(i));
+                cz = f32x8::splat(*self.z.as_ptr().add(i));
+                sr = f32x8::splat(*self.r.as_ptr().add(i));
+            }
 
             for j in 0..other_chunks {
                 let base = j * 8;
-                let ox = f32x8::new(other.x[base..base + 8].try_into().unwrap());
-                let oy = f32x8::new(other.y[base..base + 8].try_into().unwrap());
-                let oz = f32x8::new(other.z[base..base + 8].try_into().unwrap());
-                let or = f32x8::new(other.r[base..base + 8].try_into().unwrap());
+                let (ox, oy, oz, or);
+                unsafe {
+                    ox = f32x8::new(*oxp.add(base).cast::<[f32; 8]>());
+                    oy = f32x8::new(*oyp.add(base).cast::<[f32; 8]>());
+                    oz = f32x8::new(*ozp.add(base).cast::<[f32; 8]>());
+                    or = f32x8::new(*orp.add(base).cast::<[f32; 8]>());
+                }
 
                 let dx = cx - ox;
                 let dy = cy - oy;
@@ -356,18 +380,20 @@ impl SpheresSoA {
         let ox = f32x8::splat(offset.x);
         let oy = f32x8::splat(offset.y);
         let oz = f32x8::splat(offset.z);
+        let xp = self.x.as_mut_ptr();
+        let yp = self.y.as_mut_ptr();
+        let zp = self.z.as_mut_ptr();
 
         for i in 0..self.chunk_count_8() {
             let base = i * 8;
-            let x: [f32; 8] = self.x[base..base + 8].try_into().unwrap();
-            let y: [f32; 8] = self.y[base..base + 8].try_into().unwrap();
-            let z: [f32; 8] = self.z[base..base + 8].try_into().unwrap();
-            let rx = f32x8::new(x) + ox;
-            let ry = f32x8::new(y) + oy;
-            let rz = f32x8::new(z) + oz;
-            self.x[base..base + 8].copy_from_slice(rx.as_array());
-            self.y[base..base + 8].copy_from_slice(ry.as_array());
-            self.z[base..base + 8].copy_from_slice(rz.as_array());
+            unsafe {
+                let x = xp.add(base).cast::<[f32; 8]>();
+                let y = yp.add(base).cast::<[f32; 8]>();
+                let z = zp.add(base).cast::<[f32; 8]>();
+                *x = *(f32x8::new(*x) + ox).as_array();
+                *y = *(f32x8::new(*y) + oy).as_array();
+                *z = *(f32x8::new(*z) + oz).as_array();
+            }
         }
     }
 
@@ -381,20 +407,23 @@ impl SpheresSoA {
         let m20 = f32x8::splat(mat.x_axis.z);
         let m21 = f32x8::splat(mat.y_axis.z);
         let m22 = f32x8::splat(mat.z_axis.z);
+        let xp = self.x.as_mut_ptr();
+        let yp = self.y.as_mut_ptr();
+        let zp = self.z.as_mut_ptr();
 
         for i in 0..self.chunk_count_8() {
             let base = i * 8;
-            let x = f32x8::new(self.x[base..base + 8].try_into().unwrap());
-            let y = f32x8::new(self.y[base..base + 8].try_into().unwrap());
-            let z = f32x8::new(self.z[base..base + 8].try_into().unwrap());
-
-            let nx = m00 * x + m01 * y + m02 * z;
-            let ny = m10 * x + m11 * y + m12 * z;
-            let nz = m20 * x + m21 * y + m22 * z;
-
-            self.x[base..base + 8].copy_from_slice(nx.as_array());
-            self.y[base..base + 8].copy_from_slice(ny.as_array());
-            self.z[base..base + 8].copy_from_slice(nz.as_array());
+            unsafe {
+                let xsl = xp.add(base).cast::<[f32; 8]>();
+                let ysl = yp.add(base).cast::<[f32; 8]>();
+                let zsl = zp.add(base).cast::<[f32; 8]>();
+                let x = f32x8::new(*xsl);
+                let y = f32x8::new(*ysl);
+                let z = f32x8::new(*zsl);
+                *xsl = *(m00 * x + m01 * y + m02 * z).as_array();
+                *ysl = *(m10 * x + m11 * y + m12 * z).as_array();
+                *zsl = *(m20 * x + m21 * y + m22 * z).as_array();
+            }
         }
     }
 
@@ -412,20 +441,23 @@ impl SpheresSoA {
         let tx = f32x8::splat(mat.translation.x);
         let ty = f32x8::splat(mat.translation.y);
         let tz = f32x8::splat(mat.translation.z);
+        let xp = self.x.as_mut_ptr();
+        let yp = self.y.as_mut_ptr();
+        let zp = self.z.as_mut_ptr();
 
         for i in 0..self.chunk_count_8() {
             let base = i * 8;
-            let x = f32x8::new(self.x[base..base + 8].try_into().unwrap());
-            let y = f32x8::new(self.y[base..base + 8].try_into().unwrap());
-            let z = f32x8::new(self.z[base..base + 8].try_into().unwrap());
-
-            let nx = m00 * x + m01 * y + m02 * z + tx;
-            let ny = m10 * x + m11 * y + m12 * z + ty;
-            let nz = m20 * x + m21 * y + m22 * z + tz;
-
-            self.x[base..base + 8].copy_from_slice(nx.as_array());
-            self.y[base..base + 8].copy_from_slice(ny.as_array());
-            self.z[base..base + 8].copy_from_slice(nz.as_array());
+            unsafe {
+                let xsl = xp.add(base).cast::<[f32; 8]>();
+                let ysl = yp.add(base).cast::<[f32; 8]>();
+                let zsl = zp.add(base).cast::<[f32; 8]>();
+                let x = f32x8::new(*xsl);
+                let y = f32x8::new(*ysl);
+                let z = f32x8::new(*zsl);
+                *xsl = *(m00 * x + m01 * y + m02 * z + tx).as_array();
+                *ysl = *(m10 * x + m11 * y + m12 * z + ty).as_array();
+                *zsl = *(m20 * x + m21 * y + m22 * z + tz).as_array();
+            }
         }
     }
 }
@@ -1230,13 +1262,20 @@ pub(crate) mod batch {
         let nz = f32x8::splat(plane.normal.z);
         let d = f32x8::splat(plane.d);
         let zero = f32x8::ZERO;
+        let xp = soa.x.as_ptr();
+        let yp = soa.y.as_ptr();
+        let zp = soa.z.as_ptr();
+        let rp = soa.r.as_ptr();
 
         for i in 0..soa.chunk_count_8() {
             let base = i * 8;
-            let cx = f32x8::new(soa.x[base..base + 8].try_into().unwrap());
-            let cy = f32x8::new(soa.y[base..base + 8].try_into().unwrap());
-            let cz = f32x8::new(soa.z[base..base + 8].try_into().unwrap());
-            let r = f32x8::new(soa.r[base..base + 8].try_into().unwrap());
+            let (cx, cy, cz, r);
+            unsafe {
+                cx = f32x8::new(*xp.add(base).cast::<[f32; 8]>());
+                cy = f32x8::new(*yp.add(base).cast::<[f32; 8]>());
+                cz = f32x8::new(*zp.add(base).cast::<[f32; 8]>());
+                r = f32x8::new(*rp.add(base).cast::<[f32; 8]>());
+            }
             let proj = nx * cx + ny * cy + nz * cz;
             let sep = proj - d - r;
             if sep.simd_le(zero).any() {
@@ -1263,13 +1302,20 @@ pub(crate) mod batch {
         let rdv8 = f32x8::splat(rdv);
         let lo = f32x8::splat(t_min);
         let hi = f32x8::splat(t_max);
+        let xp = soa.x.as_ptr();
+        let yp = soa.y.as_ptr();
+        let zp = soa.z.as_ptr();
+        let rp = soa.r.as_ptr();
 
         for i in 0..soa.chunk_count_8() {
             let base = i * 8;
-            let cx = f32x8::new(soa.x[base..base + 8].try_into().unwrap());
-            let cy = f32x8::new(soa.y[base..base + 8].try_into().unwrap());
-            let cz = f32x8::new(soa.z[base..base + 8].try_into().unwrap());
-            let r = f32x8::new(soa.r[base..base + 8].try_into().unwrap());
+            let (cx, cy, cz, r);
+            unsafe {
+                cx = f32x8::new(*xp.add(base).cast::<[f32; 8]>());
+                cy = f32x8::new(*yp.add(base).cast::<[f32; 8]>());
+                cz = f32x8::new(*zp.add(base).cast::<[f32; 8]>());
+                r = f32x8::new(*rp.add(base).cast::<[f32; 8]>());
+            }
 
             let dfx = cx - ox;
             let dfy = cy - oy;

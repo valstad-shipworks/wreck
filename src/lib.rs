@@ -862,7 +862,7 @@ macro_rules! impl_collider_query_sphere {
         impl ColliderQuery<$pcl> for Sphere {
             fn query_collider(&self, c: &Collider<$pcl>) -> bool {
                 if c.mask == 0 { return false; }
-                (c.mask & Collider::<$pcl>::MASK_SPHERES != 0 && c.spheres.any_collides_sphere(&self.broadphase()))
+                (c.mask & Collider::<$pcl>::MASK_SPHERES != 0 && c.spheres.any_collides_sphere(self))
                     || (c.mask & Collider::<$pcl>::MASK_POINTS != 0 && c.points.collides_only_broadphase(self))
                     || (c.mask & Collider::<$pcl>::MASK_CAPSULES != 0
                         && c.capsules.collides_only_broadphase(self)
@@ -1006,7 +1006,7 @@ macro_rules! impl_collider_collides_other {
                     return false;
                 }
 
-                (other.mask & Self::MASK_SPHERES != 0 && other.spheres.iter().any(|x| self.collides(&x)))
+                (other.mask & Self::MASK_SPHERES != 0 && self.spheres.any_collides_soa(&other.spheres))
                     || (other.mask & Self::MASK_POINTS != 0 && other.points.iter().any(|x| self.collides(x)))
                     || (other.mask & Self::MASK_CAPSULES != 0 && other.capsules.iter().any(|x| self.collides(x)))
                     || (other.mask & Self::MASK_CUBOIDS != 0 && other.cuboids.iter().any(|x| self.collides(x)))
