@@ -7,7 +7,7 @@ use crate::line::{Line, LineSegment, Ray};
 use crate::plane::{ConvexPolygon, Plane};
 use crate::point::Point;
 use crate::pointcloud::{NoPcl, PointCloudMarker};
-use crate::soa::BroadCollection;
+use crate::soa::{BroadCollection, SpheresSoA};
 use crate::sphere::Sphere;
 use crate::{Bounded, Collider, Scalable, Transformable};
 use approx::{AbsDiffEq, RelativeEq};
@@ -434,6 +434,41 @@ where
 {
     fn eq(&self, other: &Self) -> bool {
         self.items() == other.items()
+    }
+}
+
+impl AbsDiffEq for SpheresSoA {
+    type Epsilon = f32;
+
+    fn default_epsilon() -> Self::Epsilon {
+        f32::default_epsilon()
+    }
+
+    fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
+        self.len() == other.len()
+            && self
+                .iter()
+                .zip(other.iter())
+                .all(|(a, b)| a.abs_diff_eq(&b, epsilon))
+    }
+}
+
+impl approx::RelativeEq for SpheresSoA {
+    fn default_max_relative() -> Self::Epsilon {
+        f32::default_max_relative()
+    }
+
+    fn relative_eq(
+        &self,
+        other: &Self,
+        epsilon: Self::Epsilon,
+        max_relative: Self::Epsilon,
+    ) -> bool {
+        self.len() == other.len()
+            && self
+                .iter()
+                .zip(other.iter())
+                .all(|(a, b)| a.relative_eq(&b, epsilon, max_relative))
     }
 }
 

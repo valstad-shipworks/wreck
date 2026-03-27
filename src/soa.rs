@@ -11,7 +11,7 @@ use crate::{Bounded, Collides, Scalable, Sphere, Transformable};
 /// so SIMD loops never need a scalar remainder path (works for both 8-wide and 16-wide).
 /// Padding slots use `r = -1.0` which guarantees `dist_sq <= (self.r + (-1))^2`
 /// is false for any reasonable query radius, preventing false positives.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SpheresSoA {
     pub x: Vec<f32>,
@@ -147,7 +147,7 @@ impl SpheresSoA {
     }
 
     #[inline]
-    fn chunk_count_8(&self) -> usize {
+    pub(crate) fn chunk_count_8(&self) -> usize {
         self.x.len() / 8
     }
 
@@ -904,6 +904,7 @@ pub(crate) mod batch {
     use glam::Vec3;
     use wide::{CmpLe, f32x8};
 
+    use super::SpheresSoA;
     use crate::Collides;
     use crate::capsule::Capsule;
     use crate::cuboid::Cuboid;
@@ -1025,39 +1026,6 @@ pub(crate) mod batch {
         }
 
         remainder.iter().any(|c| sphere.collides(c))
-    }
-
-    // ── Plane vs Sphere ──────────────────────────────────────────────────
-
-    pub fn plane_vs_spheres(plane: &Plane, others: &[Sphere]) -> bool {
-        let nx = f32x8::splat(plane.normal.x);
-        let ny = f32x8::splat(plane.normal.y);
-        let nz = f32x8::splat(plane.normal.z);
-        let d = f32x8::splat(plane.d);
-        let zero = f32x8::ZERO;
-
-        let chunks = others.chunks_exact(8);
-        let remainder = chunks.remainder();
-
-        for chunk in chunks {
-            let mut cx = [0.0f32; 8];
-            let mut cy = [0.0f32; 8];
-            let mut cz = [0.0f32; 8];
-            let mut r = [0.0f32; 8];
-            for (i, s) in chunk.iter().enumerate() {
-                cx[i] = s.center.x;
-                cy[i] = s.center.y;
-                cz[i] = s.center.z;
-                r[i] = s.radius;
-            }
-            let proj = nx * f32x8::new(cx) + ny * f32x8::new(cy) + nz * f32x8::new(cz);
-            let sep = proj - d - f32x8::new(r);
-            if sep.simd_le(zero).any() {
-                return true;
-            }
-        }
-
-        remainder.iter().any(|s| plane.collides(s))
     }
 
     // ── Plane vs Capsule ─────────────────────────────────────────────────
@@ -1256,15 +1224,35 @@ pub(crate) mod batch {
         remainder.iter().any(|c| plane.collides(c))
     }
 
-    // ── Line/Ray/Segment vs Sphere ───────────────────────────────────────
+    pub fn plane_vs_spheres_soa(plane: &Plane, soa: &SpheresSoA) -> bool {
+        let nx = f32x8::splat(plane.normal.x);
+        let ny = f32x8::splat(plane.normal.y);
+        let nz = f32x8::splat(plane.normal.z);
+        let d = f32x8::splat(plane.d);
+        let zero = f32x8::ZERO;
 
-    fn line_vs_spheres_inner(
+        for i in 0..soa.chunk_count_8() {
+            let base = i * 8;
+            let cx = f32x8::new(soa.x[base..base + 8].try_into().unwrap());
+            let cy = f32x8::new(soa.y[base..base + 8].try_into().unwrap());
+            let cz = f32x8::new(soa.z[base..base + 8].try_into().unwrap());
+            let r = f32x8::new(soa.r[base..base + 8].try_into().unwrap());
+            let proj = nx * cx + ny * cy + nz * cz;
+            let sep = proj - d - r;
+            if sep.simd_le(zero).any() {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn line_vs_spheres_soa_inner(
         origin: Vec3,
         dir: Vec3,
         rdv: f32,
         t_min: f32,
         t_max: f32,
-        others: &[Sphere],
+        soa: &SpheresSoA,
     ) -> bool {
         let ox = f32x8::splat(origin.x);
         let oy = f32x8::splat(origin.y);
@@ -1276,24 +1264,12 @@ pub(crate) mod batch {
         let lo = f32x8::splat(t_min);
         let hi = f32x8::splat(t_max);
 
-        let chunks = others.chunks_exact(8);
-        let remainder = chunks.remainder();
-
-        for chunk in chunks {
-            let mut cx = [0.0f32; 8];
-            let mut cy = [0.0f32; 8];
-            let mut cz = [0.0f32; 8];
-            let mut r = [0.0f32; 8];
-            for (i, s) in chunk.iter().enumerate() {
-                cx[i] = s.center.x;
-                cy[i] = s.center.y;
-                cz[i] = s.center.z;
-                r[i] = s.radius;
-            }
-            let cx = f32x8::new(cx);
-            let cy = f32x8::new(cy);
-            let cz = f32x8::new(cz);
-            let r = f32x8::new(r);
+        for i in 0..soa.chunk_count_8() {
+            let base = i * 8;
+            let cx = f32x8::new(soa.x[base..base + 8].try_into().unwrap());
+            let cy = f32x8::new(soa.y[base..base + 8].try_into().unwrap());
+            let cz = f32x8::new(soa.z[base..base + 8].try_into().unwrap());
+            let r = f32x8::new(soa.r[base..base + 8].try_into().unwrap());
 
             let dfx = cx - ox;
             let dfy = cy - oy;
@@ -1313,34 +1289,25 @@ pub(crate) mod batch {
                 return true;
             }
         }
-
-        for s in remainder {
-            let t = crate::line::closest_t_to_point(origin, dir, rdv, s.center, t_min, t_max);
-            let closest = origin + dir * t;
-            let d = closest - s.center;
-            if d.dot(d) <= s.radius * s.radius {
-                return true;
-            }
-        }
         false
     }
 
-    pub fn line_vs_spheres(line: &Line, others: &[Sphere]) -> bool {
-        line_vs_spheres_inner(
+    pub fn line_vs_spheres_soa(line: &Line, soa: &SpheresSoA) -> bool {
+        line_vs_spheres_soa_inner(
             line.origin,
             line.dir,
             line.rdv,
             f32::NEG_INFINITY,
             f32::INFINITY,
-            others,
+            soa,
         )
     }
 
-    pub fn ray_vs_spheres(ray: &Ray, others: &[Sphere]) -> bool {
-        line_vs_spheres_inner(ray.origin, ray.dir, ray.rdv, 0.0, f32::INFINITY, others)
+    pub fn ray_vs_spheres_soa(ray: &Ray, soa: &SpheresSoA) -> bool {
+        line_vs_spheres_soa_inner(ray.origin, ray.dir, ray.rdv, 0.0, f32::INFINITY, soa)
     }
 
-    pub fn segment_vs_spheres(seg: &LineSegment, others: &[Sphere]) -> bool {
-        line_vs_spheres_inner(seg.p1, seg.dir, seg.rdv, 0.0, 1.0, others)
+    pub fn segment_vs_spheres_soa(seg: &LineSegment, soa: &SpheresSoA) -> bool {
+        line_vs_spheres_soa_inner(seg.p1, seg.dir, seg.rdv, 0.0, 1.0, soa)
     }
 }
