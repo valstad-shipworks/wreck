@@ -9,8 +9,8 @@ use crate::{Bounded, Collides, Scalable, Sphere, Transformable};
 ///
 /// Stores x, y, z, r in separate contiguous arrays, padded to a multiple of 16
 /// so SIMD loops never need a scalar remainder path (works for both 8-wide and 16-wide).
-/// Padding slots use `r = -1.0` which guarantees `dist_sq <= (self.r + (-1))^2`
-/// is false for any reasonable query radius, preventing false positives.
+/// Padding slots use `r = NaN` so that SIMD lane comparisons
+/// (`dist_sq <= (r_a + r_b)²`) always return false, preventing false positives.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SpheresSoA {
@@ -70,7 +70,7 @@ impl SpheresSoA {
             x.push(0.0);
             y.push(0.0);
             z.push(0.0);
-            r.push(-1.0);
+            r.push(f32::NAN);
         }
 
         Self { x, y, z, r, len }
@@ -91,7 +91,7 @@ impl SpheresSoA {
             self.x.extend_from_slice(&[0.0; PAD]);
             self.y.extend_from_slice(&[0.0; PAD]);
             self.z.extend_from_slice(&[0.0; PAD]);
-            self.r.extend_from_slice(&[-1.0; PAD]);
+            self.r.extend_from_slice(&[f32::NAN; PAD]);
         }
         self.x[self.len] = sphere.center.x;
         self.y[self.len] = sphere.center.y;
@@ -121,14 +121,14 @@ impl SpheresSoA {
         self.x.resize(padded, 0.0);
         self.y.resize(padded, 0.0);
         self.z.resize(padded, 0.0);
-        self.r.resize(padded, -1.0);
+        self.r.resize(padded, f32::NAN);
         // Clear other
         other.clear();
     }
 
     pub fn clear(&mut self) {
         for i in 0..self.len {
-            self.r[i] = -1.0;
+            self.r[i] = f32::NAN;
         }
         self.len = 0;
     }
