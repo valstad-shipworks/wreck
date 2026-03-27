@@ -77,22 +77,23 @@ impl<const P: usize, const V: usize> Scalable for ArrayConvexPolytope<P, V> {
 
 #[inherent]
 impl<const P: usize, const V: usize> Transformable for ArrayConvexPolytope<P, V> {
-    pub fn translate(&mut self, offset: Vec3) {
+    pub fn translate(&mut self, offset: glam::Vec3A) {
+        let off = Vec3::from(offset);
         for (n, d) in &mut self.planes {
-            *d += n.dot(offset);
+            *d += n.dot(off);
         }
         for v in &mut self.vertices {
-            *v += offset;
+            *v += off;
         }
         self.obb.translate(offset);
     }
 
-    pub fn rotate_mat(&mut self, mat: glam::Mat3) {
+    pub fn rotate_mat(&mut self, mat: glam::Mat3A) {
         for (n, _) in &mut self.planes {
-            *n = mat * *n;
+            *n = Vec3::from(mat * glam::Vec3A::from(*n));
         }
         for v in &mut self.vertices {
-            *v = mat * *v;
+            *v = Vec3::from(mat * glam::Vec3A::from(*v));
         }
         self.obb.rotate_mat(mat);
     }
@@ -107,14 +108,15 @@ impl<const P: usize, const V: usize> Transformable for ArrayConvexPolytope<P, V>
         self.obb.rotate_quat(quat);
     }
 
-    pub fn transform(&mut self, mat: glam::Affine3) {
+    pub fn transform(&mut self, mat: glam::Affine3A) {
         let rot = mat.matrix3;
+        let trans = Vec3::from(mat.translation);
         for (n, d) in &mut self.planes {
-            *n = rot * *n;
-            *d += n.dot(mat.translation);
+            *n = Vec3::from(rot * glam::Vec3A::from(*n));
+            *d += n.dot(trans);
         }
         for v in &mut self.vertices {
-            *v = mat.transform_point3(*v);
+            *v = Vec3::from(mat.transform_point3a(glam::Vec3A::from(*v)));
         }
         self.obb.transform(mat);
     }

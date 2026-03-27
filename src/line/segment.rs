@@ -90,13 +90,13 @@ impl Scalable for LineSegment {
 
 #[inherent]
 impl Transformable for LineSegment {
-    pub fn translate(&mut self, offset: Vec3) {
-        self.p1 += offset;
+    pub fn translate(&mut self, offset: glam::Vec3A) {
+        self.p1 = Vec3::from(glam::Vec3A::from(self.p1) + offset);
     }
 
-    pub fn rotate_mat(&mut self, mat: glam::Mat3) {
-        self.p1 = mat * self.p1;
-        self.dir = mat * self.dir;
+    pub fn rotate_mat(&mut self, mat: glam::Mat3A) {
+        self.p1 = Vec3::from(mat * glam::Vec3A::from(self.p1));
+        self.dir = Vec3::from(mat * glam::Vec3A::from(self.dir));
     }
 
     pub fn rotate_quat(&mut self, quat: glam::Quat) {
@@ -104,10 +104,9 @@ impl Transformable for LineSegment {
         self.dir = quat * self.dir;
     }
 
-    pub fn transform(&mut self, mat: glam::Affine3) {
-        let p2 = mat.transform_point3(self.p1 + self.dir);
-        self.p1 = mat.transform_point3(self.p1);
-        self.dir = p2 - self.p1;
+    pub fn transform(&mut self, mat: glam::Affine3A) {
+        self.p1 = Vec3::from(mat.transform_point3a(glam::Vec3A::from(self.p1)));
+        self.dir = Vec3::from(mat.matrix3 * glam::Vec3A::from(self.dir));
         let len_sq = self.dir.dot(self.dir);
         self.rdv = if len_sq > f32::EPSILON {
             1.0 / len_sq

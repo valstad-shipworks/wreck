@@ -81,35 +81,35 @@ pub trait Scalable: Sized + Clone {
 }
 
 pub trait Transformable: Sized + Clone {
-    fn translate(&mut self, offset: glam::Vec3);
+    fn translate(&mut self, offset: glam::Vec3A);
     #[inline]
-    fn translated(self, offset: glam::Vec3) -> Self {
+    fn translated(self, offset: glam::Vec3A) -> Self {
         let mut cloned = self.clone();
         cloned.translate(offset);
         cloned
     }
     #[inline]
     fn translate_d(&mut self, offset: glam::DVec3) {
-        self.translate(offset.as_vec3());
+        self.translate(glam::Vec3A::from(offset.as_vec3()));
     }
     #[inline]
     fn translated_d(self, offset: glam::DVec3) -> Self {
-        self.translated(offset.as_vec3())
+        self.translated(glam::Vec3A::from(offset.as_vec3()))
     }
-    fn rotate_mat(&mut self, mat: glam::Mat3);
+    fn rotate_mat(&mut self, mat: glam::Mat3A);
     #[inline]
-    fn rotated_mat(self, mat: glam::Mat3) -> Self {
+    fn rotated_mat(self, mat: glam::Mat3A) -> Self {
         let mut cloned = self.clone();
         cloned.rotate_mat(mat);
         cloned
     }
     #[inline]
     fn rotate_mat_d(&mut self, mat: glam::DMat3) {
-        self.rotate_mat(mat.as_mat3());
+        self.rotate_mat(glam::Mat3A::from(mat.as_mat3()));
     }
     #[inline]
     fn rotated_mat_d(self, mat: glam::DMat3) -> Self {
-        self.rotated_mat(mat.as_mat3())
+        self.rotated_mat(glam::Mat3A::from(mat.as_mat3()))
     }
     fn rotate_quat(&mut self, quat: glam::Quat);
     #[inline]
@@ -126,20 +126,20 @@ pub trait Transformable: Sized + Clone {
     fn rotated_quat_d(self, quat: glam::DQuat) -> Self {
         self.rotated_quat(quat.as_quat())
     }
-    fn transform(&mut self, mat: glam::Affine3);
+    fn transform(&mut self, mat: glam::Affine3A);
     #[inline]
-    fn transformed(self, mat: glam::Affine3) -> Self {
+    fn transformed(self, mat: glam::Affine3A) -> Self {
         let mut cloned = self.clone();
         cloned.transform(mat);
         cloned
     }
     #[inline]
     fn transform_d(&mut self, mat: glam::DAffine3) {
-        self.transform(mat.as_affine3());
+        self.transform(glam::Affine3A::from(mat.as_affine3()));
     }
     #[inline]
     fn transformed_d(self, mat: glam::DAffine3) -> Self {
-        self.transformed(mat.as_affine3())
+        self.transformed(glam::Affine3A::from(mat.as_affine3()))
     }
 }
 
@@ -359,88 +359,96 @@ impl<PCL: PointCloudMarker> Default for Collider<PCL> {
 }
 
 impl<PCL: PointCloudMarker> Transformable for Collider<PCL> {
-    fn translate(&mut self, offset: glam::Vec3) {
-        self.capsules.translate(offset);
-        self.cuboids.translate(offset);
-        self.cylinders.translate(offset);
-        for plane in &mut self.planes {
-            plane.translate(offset);
+    fn translate(&mut self, offset: glam::Vec3A) {
+        let m = self.mask;
+        if m & Self::MASK_CAPSULES != 0 { self.capsules.translate(offset); }
+        if m & Self::MASK_CUBOIDS != 0 { self.cuboids.translate(offset); }
+        if m & Self::MASK_CYLINDERS != 0 { self.cylinders.translate(offset); }
+        if m & Self::MASK_PLANES != 0 {
+            for plane in &mut self.planes { plane.translate(offset); }
         }
-        self.polygons.translate(offset);
-        self.polytopes.translate(offset);
-        self.points.translate(offset);
-        self.spheres.translate(offset);
-        for line in &mut self.lines {
-            line.translate(offset);
+        if m & Self::MASK_POLYGONS != 0 { self.polygons.translate(offset); }
+        if m & Self::MASK_POLYTOPES != 0 { self.polytopes.translate(offset); }
+        if m & Self::MASK_POINTS != 0 { self.points.translate(offset); }
+        if m & Self::MASK_SPHERES != 0 { self.spheres.translate(offset); }
+        if m & Self::MASK_LINES != 0 {
+            for line in &mut self.lines { line.translate(offset); }
         }
-        for ray in &mut self.rays {
-            ray.translate(offset);
+        if m & Self::MASK_RAYS != 0 {
+            for ray in &mut self.rays { ray.translate(offset); }
         }
-        self.segments.translate(offset);
+        if m & Self::MASK_SEGMENTS != 0 { self.segments.translate(offset); }
+        if m & Self::MASK_POINTCLOUDS != 0 { self.pointclouds.translate(offset); }
         self.bounding.translate(offset);
     }
 
-    fn rotate_mat(&mut self, mat: glam::Mat3) {
-        self.capsules.rotate_mat(mat);
-        self.cuboids.rotate_mat(mat);
-        self.cylinders.rotate_mat(mat);
-        for plane in &mut self.planes {
-            plane.rotate_mat(mat);
+    fn rotate_mat(&mut self, mat: glam::Mat3A) {
+        let m = self.mask;
+        if m & Self::MASK_CAPSULES != 0 { self.capsules.rotate_mat(mat); }
+        if m & Self::MASK_CUBOIDS != 0 { self.cuboids.rotate_mat(mat); }
+        if m & Self::MASK_CYLINDERS != 0 { self.cylinders.rotate_mat(mat); }
+        if m & Self::MASK_PLANES != 0 {
+            for plane in &mut self.planes { plane.rotate_mat(mat); }
         }
-        self.polygons.rotate_mat(mat);
-        self.polytopes.rotate_mat(mat);
-        self.points.rotate_mat(mat);
-        self.spheres.rotate_mat(mat);
-        for line in &mut self.lines {
-            line.rotate_mat(mat);
+        if m & Self::MASK_POLYGONS != 0 { self.polygons.rotate_mat(mat); }
+        if m & Self::MASK_POLYTOPES != 0 { self.polytopes.rotate_mat(mat); }
+        if m & Self::MASK_POINTS != 0 { self.points.rotate_mat(mat); }
+        if m & Self::MASK_SPHERES != 0 { self.spheres.rotate_mat(mat); }
+        if m & Self::MASK_LINES != 0 {
+            for line in &mut self.lines { line.rotate_mat(mat); }
         }
-        for ray in &mut self.rays {
-            ray.rotate_mat(mat);
+        if m & Self::MASK_RAYS != 0 {
+            for ray in &mut self.rays { ray.rotate_mat(mat); }
         }
-        self.segments.rotate_mat(mat);
-        self.bounding.center = mat * self.bounding.center;
+        if m & Self::MASK_SEGMENTS != 0 { self.segments.rotate_mat(mat); }
+        if m & Self::MASK_POINTCLOUDS != 0 { self.pointclouds.rotate_mat(mat); }
+        self.bounding.center = glam::Vec3::from(mat * glam::Vec3A::from(self.bounding.center));
     }
 
     fn rotate_quat(&mut self, quat: glam::Quat) {
-        self.capsules.rotate_quat(quat);
-        self.cuboids.rotate_quat(quat);
-        self.cylinders.rotate_quat(quat);
-        for plane in &mut self.planes {
-            plane.rotate_quat(quat);
+        let m = self.mask;
+        if m & Self::MASK_CAPSULES != 0 { self.capsules.rotate_quat(quat); }
+        if m & Self::MASK_CUBOIDS != 0 { self.cuboids.rotate_quat(quat); }
+        if m & Self::MASK_CYLINDERS != 0 { self.cylinders.rotate_quat(quat); }
+        if m & Self::MASK_PLANES != 0 {
+            for plane in &mut self.planes { plane.rotate_quat(quat); }
         }
-        self.polygons.rotate_quat(quat);
-        self.polytopes.rotate_quat(quat);
-        self.points.rotate_quat(quat);
-        self.spheres.rotate_quat(quat);
-        for line in &mut self.lines {
-            line.rotate_quat(quat);
+        if m & Self::MASK_POLYGONS != 0 { self.polygons.rotate_quat(quat); }
+        if m & Self::MASK_POLYTOPES != 0 { self.polytopes.rotate_quat(quat); }
+        if m & Self::MASK_POINTS != 0 { self.points.rotate_quat(quat); }
+        if m & Self::MASK_SPHERES != 0 { self.spheres.rotate_quat(quat); }
+        if m & Self::MASK_LINES != 0 {
+            for line in &mut self.lines { line.rotate_quat(quat); }
         }
-        for ray in &mut self.rays {
-            ray.rotate_quat(quat);
+        if m & Self::MASK_RAYS != 0 {
+            for ray in &mut self.rays { ray.rotate_quat(quat); }
         }
-        self.segments.rotate_quat(quat);
+        if m & Self::MASK_SEGMENTS != 0 { self.segments.rotate_quat(quat); }
+        if m & Self::MASK_POINTCLOUDS != 0 { self.pointclouds.rotate_quat(quat); }
         self.bounding.center = quat * self.bounding.center;
     }
 
-    fn transform(&mut self, mat: glam::Affine3) {
-        self.capsules.transform(mat);
-        self.cuboids.transform(mat);
-        self.cylinders.transform(mat);
-        for plane in &mut self.planes {
-            plane.transform(mat);
+    fn transform(&mut self, mat: glam::Affine3A) {
+        let m = self.mask;
+        if m & Self::MASK_CAPSULES != 0 { self.capsules.transform(mat); }
+        if m & Self::MASK_CUBOIDS != 0 { self.cuboids.transform(mat); }
+        if m & Self::MASK_CYLINDERS != 0 { self.cylinders.transform(mat); }
+        if m & Self::MASK_PLANES != 0 {
+            for plane in &mut self.planes { plane.transform(mat); }
         }
-        self.polygons.transform(mat);
-        self.polytopes.transform(mat);
-        self.points.transform(mat);
-        self.spheres.transform(mat);
-        for line in &mut self.lines {
-            line.transform(mat);
+        if m & Self::MASK_POLYGONS != 0 { self.polygons.transform(mat); }
+        if m & Self::MASK_POLYTOPES != 0 { self.polytopes.transform(mat); }
+        if m & Self::MASK_POINTS != 0 { self.points.transform(mat); }
+        if m & Self::MASK_SPHERES != 0 { self.spheres.transform(mat); }
+        if m & Self::MASK_LINES != 0 {
+            for line in &mut self.lines { line.transform(mat); }
         }
-        for ray in &mut self.rays {
-            ray.transform(mat);
+        if m & Self::MASK_RAYS != 0 {
+            for ray in &mut self.rays { ray.transform(mat); }
         }
-        self.segments.transform(mat);
-        self.bounding.center = mat.transform_point3(self.bounding.center);
+        if m & Self::MASK_SEGMENTS != 0 { self.segments.transform(mat); }
+        if m & Self::MASK_POINTCLOUDS != 0 { self.pointclouds.transform(mat); }
+        self.bounding.center = glam::Vec3::from(mat.transform_point3a(glam::Vec3A::from(self.bounding.center)));
     }
 }
 

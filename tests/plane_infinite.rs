@@ -195,7 +195,7 @@ fn plane_from_point_normal() {
 #[test]
 fn plane_translate() {
     let mut p = Plane::new(Vec3::Y, 0.0);
-    p.translate(Vec3::new(0.0, 3.0, 0.0));
+    p.translate(glam::Vec3A::new(0.0, 3.0, 0.0));
     assert_eq!(p.d, 3.0);
 }
 

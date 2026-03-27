@@ -60,13 +60,13 @@ impl Scalable for Line {
 
 #[inherent]
 impl Transformable for Line {
-    pub fn translate(&mut self, offset: Vec3) {
-        self.origin += offset;
+    pub fn translate(&mut self, offset: glam::Vec3A) {
+        self.origin = Vec3::from(glam::Vec3A::from(self.origin) + offset);
     }
 
-    pub fn rotate_mat(&mut self, mat: glam::Mat3) {
-        self.origin = mat * self.origin;
-        self.dir = mat * self.dir;
+    pub fn rotate_mat(&mut self, mat: glam::Mat3A) {
+        self.origin = Vec3::from(mat * glam::Vec3A::from(self.origin));
+        self.dir = Vec3::from(mat * glam::Vec3A::from(self.dir));
     }
 
     pub fn rotate_quat(&mut self, quat: glam::Quat) {
@@ -74,9 +74,9 @@ impl Transformable for Line {
         self.dir = quat * self.dir;
     }
 
-    pub fn transform(&mut self, mat: glam::Affine3) {
-        self.origin = mat.transform_point3(self.origin);
-        self.dir = mat.matrix3 * self.dir;
+    pub fn transform(&mut self, mat: glam::Affine3A) {
+        self.origin = Vec3::from(mat.transform_point3a(glam::Vec3A::from(self.origin)));
+        self.dir = Vec3::from(mat.matrix3 * glam::Vec3A::from(self.dir));
     }
 }
 

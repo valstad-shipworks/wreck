@@ -337,7 +337,7 @@ fn segment_collides_many_spheres() {
 #[test]
 fn segment_translate() {
     let mut s = LineSegment::new(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0));
-    s.translate(Vec3::new(0.0, 5.0, 0.0));
+    s.translate(glam::Vec3A::new(0.0, 5.0, 0.0));
     assert_eq!(s.p1, Vec3::new(0.0, 5.0, 0.0));
 }
 

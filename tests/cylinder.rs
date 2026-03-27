@@ -242,7 +242,7 @@ fn cylinder_bounded() {
 fn cylinder_transform() {
     use wreck::Transformable;
     let mut c = cyl();
-    c.translate(Vec3::new(1.0, 0.0, 0.0));
+    c.translate(glam::Vec3A::new(1.0, 0.0, 0.0));
     assert_eq!(c.p1, Vec3::new(1.0, 0.0, 0.0));
     assert_eq!(c.p2(), Vec3::new(1.0, 0.0, 4.0));
 }

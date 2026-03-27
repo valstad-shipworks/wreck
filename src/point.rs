@@ -27,20 +27,20 @@ impl Scalable for Point {
 
 #[inherent]
 impl Transformable for Point {
-    pub fn translate(&mut self, offset: Vec3) {
-        self.0 += offset;
+    pub fn translate(&mut self, offset: glam::Vec3A) {
+        self.0 = Vec3::from(glam::Vec3A::from(self.0) + offset);
     }
 
-    pub fn rotate_mat(&mut self, mat: glam::Mat3) {
-        self.0 = mat * self.0;
+    pub fn rotate_mat(&mut self, mat: glam::Mat3A) {
+        self.0 = Vec3::from(mat * glam::Vec3A::from(self.0));
     }
 
     pub fn rotate_quat(&mut self, quat: glam::Quat) {
         self.0 = quat * self.0;
     }
 
-    pub fn transform(&mut self, mat: glam::Affine3) {
-        self.0 = mat.transform_point3(self.0);
+    pub fn transform(&mut self, mat: glam::Affine3A) {
+        self.0 = Vec3::from(mat.transform_point3a(glam::Vec3A::from(self.0)));
     }
 }
 

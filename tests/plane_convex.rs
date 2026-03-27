@@ -235,7 +235,7 @@ fn polygon_polygon_parallel_separated() {
 #[test]
 fn polygon_translate() {
     let mut poly = unit_square();
-    poly.translate(Vec3::new(0.0, 5.0, 0.0));
+    poly.translate(glam::Vec3A::new(0.0, 5.0, 0.0));
     assert_eq!(poly.center, Vec3::new(0.0, 5.0, 0.0));
     // Sphere at origin should miss now
     let s = Sphere::new(Vec3::ZERO, 0.5);

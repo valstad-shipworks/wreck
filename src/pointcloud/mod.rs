@@ -32,11 +32,11 @@ pub struct Pointcloud {
     spheres: SpheresSoA,
     point_radius: f32,
     r_range: (f32, f32),
-    inverse_transform: Option<glam::Affine3>,
+    inverse_transform: Option<glam::Affine3A>,
 }
 
 impl Pointcloud {
-    pub fn inverse_transform(&self) -> Option<&glam::Affine3> {
+    pub fn inverse_transform(&self) -> Option<&glam::Affine3A> {
         self.inverse_transform.as_ref()
     }
 
@@ -77,20 +77,20 @@ impl Pointcloud {
 
 #[inherent]
 impl Transformable for Pointcloud {
-    pub fn translate(&mut self, offset: Vec3) {
-        self.transform(glam::Affine3::from_translation(offset));
+    pub fn translate(&mut self, offset: glam::Vec3A) {
+        self.transform(glam::Affine3A::from_translation(Vec3::from(offset)));
     }
 
-    pub fn rotate_mat(&mut self, mat: glam::Mat3) {
-        self.transform(glam::Affine3::from_mat3(mat));
+    pub fn rotate_mat(&mut self, mat: glam::Mat3A) {
+        self.transform(glam::Affine3A::from_mat3(mat.into()));
     }
 
     pub fn rotate_quat(&mut self, quat: glam::Quat) {
-        self.transform(glam::Affine3::from_quat(quat));
+        self.transform(glam::Affine3A::from_quat(quat));
     }
 
     #[inline]
-    pub fn transform(&mut self, mat: glam::Affine3) {
+    pub fn transform(&mut self, mat: glam::Affine3A) {
         let new_inv = mat.inverse();
         self.inverse_transform = Some(match self.inverse_transform {
             Some(existing) => existing * new_inv,
@@ -116,7 +116,7 @@ impl Scalable for Pointcloud {
         if let Some(inv) = self.inverse_transform.take() {
             let fwd = inv.inverse();
             for i in 0..n {
-                let v = fwd.transform_point3(Vec3::new(
+                let v = fwd.transform_point3a(glam::Vec3A::new(
                     self.spheres.x[i],
                     self.spheres.y[i],
                     self.spheres.z[i],
@@ -183,7 +183,7 @@ impl Collides<Sphere> for Pointcloud {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, sphere: &Sphere) -> bool {
         let center = match &self.inverse_transform {
-            Some(inv) => inv.transform_point3(sphere.center),
+            Some(inv) => Vec3::from(inv.transform_point3a(glam::Vec3A::from(sphere.center))),
             None => sphere.center,
         };
         self.tree.collides(&center.to_array(), sphere.radius)
@@ -587,8 +587,8 @@ impl Collides<Plane> for Pointcloud {
     fn test<const BROADPHASE: bool>(&self, plane: &Plane) -> bool {
         let (normal, d) = match &self.inverse_transform {
             Some(inv) => {
-                let n = inv.matrix3 * plane.normal;
-                let d = plane.d + plane.normal.dot(inv.translation);
+                let n = Vec3::from(inv.matrix3 * glam::Vec3A::from(plane.normal));
+                let d = plane.d + glam::Vec3A::from(plane.normal).dot(inv.translation);
                 (n, d)
             }
             None => (plane.normal, plane.d),
@@ -665,8 +665,8 @@ macro_rules! impl_line_pcl {
             fn test<const BROADPHASE: bool>(&self, line: &$LineType) -> bool {
                 let (origin, dir, rdv) = match &self.inverse_transform {
                     Some(inv) => {
-                        let o = inv.transform_point3(line.origin_());
-                        let d = inv.matrix3 * line.dir_();
+                        let o = Vec3::from(inv.transform_point3a(glam::Vec3A::from(line.origin_())));
+                        let d = Vec3::from(inv.matrix3 * glam::Vec3A::from(line.dir_()));
                         let len_sq = d.dot(d);
                         let rdv = if len_sq > f32::EPSILON {
                             1.0 / len_sq

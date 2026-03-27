@@ -161,14 +161,14 @@ impl Scalable for Cuboid {
 
 #[inherent]
 impl Transformable for Cuboid {
-    pub fn translate(&mut self, offset: Vec3) {
-        self.center += offset;
+    pub fn translate(&mut self, offset: glam::Vec3A) {
+        self.center = Vec3::from(glam::Vec3A::from(self.center) + offset);
     }
 
-    pub fn rotate_mat(&mut self, mat: glam::Mat3) {
-        self.center = mat * self.center;
+    pub fn rotate_mat(&mut self, mat: glam::Mat3A) {
+        self.center = Vec3::from(mat * glam::Vec3A::from(self.center));
         for ax in &mut self.axes {
-            *ax = mat * *ax;
+            *ax = Vec3::from(mat * glam::Vec3A::from(*ax));
         }
         self.axis_aligned = is_axis_aligned(&self.axes);
     }
@@ -181,11 +181,11 @@ impl Transformable for Cuboid {
         self.axis_aligned = is_axis_aligned(&self.axes);
     }
 
-    pub fn transform(&mut self, mat: glam::Affine3) {
-        self.center = mat.transform_point3(self.center);
+    pub fn transform(&mut self, mat: glam::Affine3A) {
+        self.center = Vec3::from(mat.transform_point3a(glam::Vec3A::from(self.center)));
         let rot = mat.matrix3;
         for ax in &mut self.axes {
-            *ax = rot * *ax;
+            *ax = Vec3::from(rot * glam::Vec3A::from(*ax));
         }
         self.axis_aligned = is_axis_aligned(&self.axes);
     }

@@ -51,21 +51,21 @@ impl Scalable for Plane {
 
 #[inherent]
 impl Transformable for Plane {
-    pub fn translate(&mut self, offset: Vec3) {
-        self.d += self.normal.dot(offset);
+    pub fn translate(&mut self, offset: glam::Vec3A) {
+        self.d += glam::Vec3A::from(self.normal).dot(offset);
     }
 
-    pub fn rotate_mat(&mut self, mat: glam::Mat3) {
-        self.normal = mat * self.normal;
+    pub fn rotate_mat(&mut self, mat: glam::Mat3A) {
+        self.normal = Vec3::from(mat * glam::Vec3A::from(self.normal));
     }
 
     pub fn rotate_quat(&mut self, quat: glam::Quat) {
         self.normal = quat * self.normal;
     }
 
-    pub fn transform(&mut self, mat: glam::Affine3) {
-        self.normal = mat.matrix3 * self.normal;
-        self.d += self.normal.dot(mat.translation);
+    pub fn transform(&mut self, mat: glam::Affine3A) {
+        self.normal = Vec3::from(mat.matrix3 * glam::Vec3A::from(self.normal));
+        self.d += glam::Vec3A::from(self.normal).dot(mat.translation);
     }
 }
 

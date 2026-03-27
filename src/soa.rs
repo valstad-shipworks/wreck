@@ -308,8 +308,8 @@ impl SpheresSoA {
 }
 
 impl Transformable for SpheresSoA {
-    /// Translate all spheres by an offset.
-    fn translate(&mut self, offset: Vec3) {
+    fn translate(&mut self, offset: glam::Vec3A) {
+        let offset = Vec3::from(offset);
         #[cfg(target_arch = "x86_64")]
         {
             if is_x86_feature_detected!("avx512f") {
@@ -321,8 +321,8 @@ impl Transformable for SpheresSoA {
         self.translate_f32x8(offset);
     }
 
-    /// Apply a 3x3 rotation matrix to all sphere centers.
-    fn rotate_mat(&mut self, mat: glam::Mat3) {
+    fn rotate_mat(&mut self, mat: glam::Mat3A) {
+        let mat = glam::Mat3::from(mat);
         #[cfg(target_arch = "x86_64")]
         {
             if is_x86_feature_detected!("avx512f") {
@@ -335,11 +335,10 @@ impl Transformable for SpheresSoA {
     }
 
     fn rotate_quat(&mut self, quat: glam::Quat) {
-        self.rotate_mat(glam::Mat3::from_quat(quat));
+        self.rotate_mat(glam::Mat3A::from_quat(quat));
     }
 
-    /// Apply an affine transform (rotation + translation) to all sphere centers.
-    fn transform(&mut self, mat: glam::Affine3) {
+    fn transform(&mut self, mat: glam::Affine3A) {
         #[cfg(target_arch = "x86_64")]
         {
             if is_x86_feature_detected!("avx512f") {
@@ -399,7 +398,7 @@ impl SpheresSoA {
         }
     }
 
-    fn transform_f32x8(&mut self, mat: glam::Affine3) {
+    fn transform_f32x8(&mut self, mat: glam::Affine3A) {
         let rot = mat.matrix3;
         let m00 = f32x8::splat(rot.x_axis.x);
         let m01 = f32x8::splat(rot.y_axis.x);
@@ -647,7 +646,7 @@ mod avx512 {
     }
 
     #[target_feature(enable = "avx512f")]
-    pub(super) unsafe fn transform_avx512(soa: &mut SpheresSoA, mat: glam::Affine3) {
+    pub(super) unsafe fn transform_avx512(soa: &mut SpheresSoA, mat: glam::Affine3A) {
         let rot = mat.matrix3;
         let m00 = _mm512_set1_ps(rot.x_axis.x);
         let m01 = _mm512_set1_ps(rot.y_axis.x);
@@ -842,14 +841,14 @@ impl<T> Transformable for BroadCollection<T>
 where
     T: Bounded + Transformable + Scalable + Debug + Clone + Sized,
 {
-    fn translate(&mut self, offset: glam::Vec3) {
+    fn translate(&mut self, offset: glam::Vec3A) {
         for item in &mut self.items {
             item.translate(offset);
         }
         self.broad.translate(offset);
     }
 
-    fn rotate_mat(&mut self, mat: glam::Mat3) {
+    fn rotate_mat(&mut self, mat: glam::Mat3A) {
         for item in &mut self.items {
             item.rotate_mat(mat);
         }
@@ -863,7 +862,7 @@ where
         self.broad.rotate_quat(quat);
     }
 
-    fn transform(&mut self, mat: glam::Affine3) {
+    fn transform(&mut self, mat: glam::Affine3A) {
         for item in &mut self.items {
             item.transform(mat);
         }

@@ -54,21 +54,13 @@ impl Bounded for NoPcl {
 
 impl Transformable for NoPcl {
     #[inline]
-    fn translate(&mut self, _offset: glam::Vec3) {
-        // No points to translate
-    }
+    fn translate(&mut self, _offset: glam::Vec3A) {}
     #[inline]
-    fn rotate_mat(&mut self, _mat: glam::Mat3) {
-        // No points to rotate
-    }
+    fn rotate_mat(&mut self, _mat: glam::Mat3A) {}
     #[inline]
-    fn rotate_quat(&mut self, _quat: glam::Quat) {
-        // No points to rotate
-    }
+    fn rotate_quat(&mut self, _quat: glam::Quat) {}
     #[inline]
-    fn transform(&mut self, _mat: glam::Affine3) {
-        // No points to transform
-    }
+    fn transform(&mut self, _mat: glam::Affine3A) {}
 }
 
 impl Scalable for NoPcl {

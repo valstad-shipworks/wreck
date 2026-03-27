@@ -41,16 +41,16 @@ impl Scalable for Sphere {
 
 #[inherent]
 impl Transformable for Sphere {
-    pub fn translate(&mut self, offset: Vec3) {
-        self.center += offset;
+    pub fn translate(&mut self, offset: glam::Vec3A) {
+        self.center = Vec3::from(glam::Vec3A::from(self.center) + offset);
     }
 
-    pub fn rotate_mat(&mut self, _mat: glam::Mat3) {}
+    pub fn rotate_mat(&mut self, _mat: glam::Mat3A) {}
 
     pub fn rotate_quat(&mut self, _quat: glam::Quat) {}
 
-    pub fn transform(&mut self, mat: glam::Affine3) {
-        self.center = mat.transform_point3(self.center);
+    pub fn transform(&mut self, mat: glam::Affine3A) {
+        self.center = Vec3::from(mat.transform_point3a(glam::Vec3A::from(self.center)));
     }
 }
 

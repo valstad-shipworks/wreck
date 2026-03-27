@@ -192,20 +192,21 @@ impl<const V: usize> Scalable for ArrayConvexPolygon<V> {
 
 #[inherent]
 impl<const V: usize> Transformable for ArrayConvexPolygon<V> {
-    pub fn translate(&mut self, offset: Vec3) {
-        self.center += offset;
+    pub fn translate(&mut self, offset: glam::Vec3A) {
+        let off = Vec3::from(offset);
+        self.center += off;
         for v in &mut self.vertices_3d {
-            *v += offset;
+            *v += off;
         }
     }
 
-    pub fn rotate_mat(&mut self, mat: glam::Mat3) {
-        self.center = mat * self.center;
-        self.normal = mat * self.normal;
-        self.u_axis = mat * self.u_axis;
-        self.v_axis = mat * self.v_axis;
+    pub fn rotate_mat(&mut self, mat: glam::Mat3A) {
+        self.center = Vec3::from(mat * glam::Vec3A::from(self.center));
+        self.normal = Vec3::from(mat * glam::Vec3A::from(self.normal));
+        self.u_axis = Vec3::from(mat * glam::Vec3A::from(self.u_axis));
+        self.v_axis = Vec3::from(mat * glam::Vec3A::from(self.v_axis));
         for v in &mut self.vertices_3d {
-            *v = mat * *v;
+            *v = Vec3::from(mat * glam::Vec3A::from(*v));
         }
     }
 
@@ -219,13 +220,14 @@ impl<const V: usize> Transformable for ArrayConvexPolygon<V> {
         }
     }
 
-    pub fn transform(&mut self, mat: glam::Affine3) {
-        self.center = mat.transform_point3(self.center);
-        self.normal = mat.matrix3 * self.normal;
-        self.u_axis = mat.matrix3 * self.u_axis;
-        self.v_axis = mat.matrix3 * self.v_axis;
+    pub fn transform(&mut self, mat: glam::Affine3A) {
+        let rot = mat.matrix3;
+        self.center = Vec3::from(mat.transform_point3a(glam::Vec3A::from(self.center)));
+        self.normal = Vec3::from(rot * glam::Vec3A::from(self.normal));
+        self.u_axis = Vec3::from(rot * glam::Vec3A::from(self.u_axis));
+        self.v_axis = Vec3::from(rot * glam::Vec3A::from(self.v_axis));
         for v in &mut self.vertices_3d {
-            *v = mat.transform_point3(*v);
+            *v = Vec3::from(mat.transform_point3a(glam::Vec3A::from(*v)));
         }
     }
 }
@@ -547,7 +549,7 @@ mod tests {
     #[test]
     fn const_translate() {
         let mut poly = UNIT_SQUARE;
-        poly.translate(Vec3::new(0.0, 5.0, 0.0));
+        poly.translate(glam::Vec3A::new(0.0, 5.0, 0.0));
         let s = Sphere::new(Vec3::ZERO, 0.5);
         assert!(!poly.collides(&s));
     }
