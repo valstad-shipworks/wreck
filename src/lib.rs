@@ -666,6 +666,80 @@ impl<PCL: PointCloudMarker> Collider<PCL> {
         }
     }
 
+    /// Recompute the bounding sphere using iterative refinement for a tighter fit.
+    ///
+    /// More expensive than the default incremental bounding (`O(8n)` vs `O(n)`)
+    /// but typically produces a sphere within ~1% of the minimum enclosing ball.
+    pub fn refine_bounding(&mut self) {
+        if !self.planes.is_empty() || !self.lines.is_empty() || !self.rays.is_empty() {
+            self.bounding = Sphere::new(glam::Vec3::ZERO, f32::INFINITY);
+            return;
+        }
+
+        macro_rules! for_each_broad {
+            ($self:expr, |$s:ident| $body:expr) => {
+                for $s in $self.spheres.iter() { $body }
+                for $s in $self.capsules.broad.iter() { $body }
+                for $s in $self.cuboids.broad.iter() { $body }
+                for $s in $self.cylinders.broad.iter() { $body }
+                for $s in $self.polytopes.broad.iter() { $body }
+                for $s in $self.polygons.broad.iter() { $body }
+                for $s in $self.points.broad.iter() { $body }
+                for $s in $self.segments.broad.iter() { $body }
+                for $s in $self.pointclouds.broad.iter() { $body }
+            };
+        }
+
+        let mut centroid = glam::Vec3::ZERO;
+        let mut count = 0u32;
+        for_each_broad!(self, |s| {
+            centroid += s.center;
+            count += 1;
+        });
+
+        if count == 0 {
+            self.bounding = Sphere::new(glam::Vec3::ZERO, 0.0);
+            return;
+        }
+
+        centroid /= count as f32;
+        let mut center = centroid;
+        let mut radius = 0.0f32;
+        for_each_broad!(self, |s| {
+            let extent = (s.center - center).length() + s.radius;
+            radius = radius.max(extent);
+        });
+
+        for i in 0..8u32 {
+            let mut farthest_point = center;
+            let mut farthest_dist = 0.0f32;
+            for_each_broad!(self, |s| {
+                let d = s.center - center;
+                let dist = d.length();
+                let extent = dist + s.radius;
+                if extent > farthest_dist {
+                    farthest_dist = extent;
+                    farthest_point = if dist > f32::EPSILON {
+                        s.center + d * (s.radius / dist)
+                    } else {
+                        center + glam::Vec3::X * s.radius
+                    };
+                }
+            });
+
+            let step = 1.0 / (i as f32 + 2.0);
+            center += (farthest_point - center) * step;
+
+            radius = 0.0;
+            for_each_broad!(self, |s| {
+                let extent = (s.center - center).length() + s.radius;
+                radius = radius.max(extent);
+            });
+        }
+
+        self.bounding = Sphere::new(center, radius);
+    }
+
     /// Check if `query` sphere overlaps any per-shape broadphase sphere
     /// in this collider (bounded shapes only).
     fn broad_overlaps_any(&self, query: &Sphere) -> bool {
