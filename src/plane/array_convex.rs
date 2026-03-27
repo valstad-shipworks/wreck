@@ -25,14 +25,19 @@ use crate::{Collides, ConvexPolytope, Scalable, Stretchable, Transformable};
 /// 2D vertices must be in counter-clockwise order when viewed from the
 /// normal direction. The const constructor panics if winding is clockwise.
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ArrayConvexPolygon<const V: usize> {
     pub center: Vec3,
     pub normal: Vec3,
     pub u_axis: Vec3,
     pub v_axis: Vec3,
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_arrays::array_as_seq"))]
     pub vertices_2d: [[f32; 2]; V],
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_arrays::array_as_seq"))]
     pub(crate) vertices_3d: [Vec3; V],
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_arrays::array_as_seq"))]
     pub(crate) edge_normals_2d: [[f32; 2]; V],
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_arrays::array_as_seq"))]
     pub(crate) edge_offsets_2d: [f32; V],
     pub(crate) bounding_radius: f32,
 }

@@ -7,6 +7,7 @@ use crate::wreck_assert;
 use crate::{Bounded, Capsule, Collides, Cuboid, Scalable, Transformable};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Sphere {
     pub center: Vec3,
     pub radius: f32,
@@ -87,6 +88,7 @@ impl Collides<Sphere> for Sphere {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum SphereStretch {
     NoStretch(Sphere),
     Stretch(Capsule),

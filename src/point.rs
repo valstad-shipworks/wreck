@@ -9,6 +9,7 @@ use crate::sphere::Sphere;
 use crate::{Bounded, Collides, Scalable, Stretchable, Transformable};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Point(pub Vec3);
 
 impl Point {

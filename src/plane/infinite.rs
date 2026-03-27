@@ -15,6 +15,7 @@ use crate::{Collides, ConvexPolytope, Scalable, Stretchable, Transformable};
 ///
 /// `normal` must be unit-length.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Plane {
     pub normal: Vec3,
     pub d: f32,

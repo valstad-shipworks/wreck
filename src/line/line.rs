@@ -15,6 +15,7 @@ const T_MAX: f32 = f32::INFINITY;
 
 /// An infinite line: `origin + t * dir` for all `t ∈ (-∞, ∞)`.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Line {
     pub origin: Vec3,
     pub dir: Vec3,
@@ -84,6 +85,7 @@ impl Transformable for Line {
 const INF: f32 = 1e12;
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum LineStretch {
     Parallel(Line),
     Polygon(ConvexPolygon),

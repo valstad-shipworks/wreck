@@ -23,6 +23,7 @@ use crate::{Bounded, Collides, ConvexPolytope, Scalable, Stretchable, Transforma
 /// 2D vertices must be in counter-clockwise order when viewed from the
 /// normal direction. If provided clockwise, the constructor reverses them.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ConvexPolygon {
     pub center: Vec3,
     pub normal: Vec3,
@@ -230,6 +231,7 @@ impl Transformable for ConvexPolygon {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ConvexPolygonStretch {
     InPlane(ConvexPolygon),
     OutOfPlane(ConvexPolytope),

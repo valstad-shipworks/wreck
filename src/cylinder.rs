@@ -15,6 +15,7 @@ use crate::wreck_assert;
 use crate::{Bounded, Collides, Scalable, Transformable};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Cylinder {
     pub p1: Vec3,
     pub dir: Vec3,
@@ -866,6 +867,7 @@ impl Collides<Cylinder> for ConvexPolytope {
 // ─── Stretchable ─────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum CylinderStretch {
     Aligned(Cylinder),
     Unaligned([Capsule; 4], ConvexPolytope),

@@ -16,8 +16,11 @@ use crate::{Collides, Scalable, Stretchable, Transformable};
 /// This is mostly meant for usage with codegen where you statically define obstacles based on
 /// some sort of file at build time, and want to be able to use them in `const` contexts.
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ArrayConvexPolytope<const P: usize, const V: usize> {
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_arrays::array_as_seq"))]
     pub planes: [(Vec3, f32); P],
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_arrays::array_as_seq"))]
     pub vertices: [Vec3; V],
     pub obb: Cuboid,
 }

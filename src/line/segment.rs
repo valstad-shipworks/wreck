@@ -14,6 +14,7 @@ const T_MAX: f32 = 1.0;
 
 /// A line segment from `p1` to `p1 + dir`.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LineSegment {
     pub p1: Vec3,
     pub dir: Vec3,
@@ -119,6 +120,7 @@ impl Transformable for LineSegment {
 // --- LineSegment–Stretch ---
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum LineSegmentStretch {
     Parallel(LineSegment),
     Polygon(ConvexPolygon),

@@ -26,6 +26,7 @@ use crate::sphere::Sphere;
 pub use no_pcl::NoPcl;
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Pointcloud {
     tree: capt::Capt<3, f32, u32>,
     spheres: SpheresSoA,

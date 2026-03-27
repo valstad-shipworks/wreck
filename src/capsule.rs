@@ -12,6 +12,7 @@ use crate::sphere::Sphere;
 use crate::{Bounded, Collides, Scalable, Transformable};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Capsule {
     pub p1: Vec3,
     pub dir: Vec3,
@@ -266,6 +267,7 @@ pub(crate) fn segment_segment_dist_sq(p1: Vec3, d1: Vec3, p2: Vec3, d2: Vec3) ->
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum CapsuleStretch {
     Aligned(Capsule),
     Unaligned([Capsule; 4], ConvexPolytope),

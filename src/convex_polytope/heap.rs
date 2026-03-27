@@ -10,6 +10,7 @@ use crate::wreck_assert;
 use crate::{Bounded, Collides, Scalable, Stretchable, Transformable};
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ConvexPolytope {
     pub planes: Vec<(Vec3, f32)>,
     pub vertices: Vec<Vec3>,

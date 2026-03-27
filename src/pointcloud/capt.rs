@@ -313,7 +313,6 @@ pub struct Capt<const K: usize, A = f32, I = usize> {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[doc(hidden)]
-/// A prismatic bounding volume.
 pub struct Aabb<A, const K: usize> {
     /// The lower bound on the volume.
     pub lo: [A; K],
@@ -971,6 +970,114 @@ unsafe fn median_partition<A: Axis, const K: usize>(points: &mut [[A; K]], k: us
             .max_by(|a, b| a.partial_cmp(b).unwrap_unchecked())
             .unwrap();
         A::in_between(med_lo, med_hi[k])
+    }
+}
+
+#[cfg(feature = "serde")]
+mod serde_impl {
+    use super::*;
+    use alloc::vec::Vec;
+    use core::alloc::Layout;
+    use core::cmp::max;
+    use serde::ser::{Serialize, SerializeStruct, Serializer};
+    use serde::de::{Deserialize, Deserializer};
+
+    impl<A: Serialize, const K: usize> Serialize for Aabb<A, K> {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            let mut state = serializer.serialize_struct("Aabb", 2)?;
+            state.serialize_field("lo", self.lo.as_slice())?;
+            state.serialize_field("hi", self.hi.as_slice())?;
+            state.end()
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    struct AabbData<A> {
+        lo: Vec<A>,
+        hi: Vec<A>,
+    }
+
+    impl<'de, A: Deserialize<'de> + Copy, const K: usize> Deserialize<'de> for Aabb<A, K> {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let data = AabbData::<A>::deserialize(deserializer)?;
+            let lo: [A; K] = data.lo.try_into().map_err(|_| {
+                serde::de::Error::invalid_length(0, &"expected array of correct length")
+            })?;
+            let hi: [A; K] = data.hi.try_into().map_err(|_| {
+                serde::de::Error::invalid_length(0, &"expected array of correct length")
+            })?;
+            Ok(Aabb { lo, hi })
+        }
+    }
+
+    impl<const K: usize, A, I> Serialize for Capt<K, A, I>
+    where
+        A: Serialize + Axis,
+        I: Serialize,
+    {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            let mut state = serializer.serialize_struct("Capt", 6)?;
+            state.serialize_field("tests", &*self.tests)?;
+            state.serialize_field("aabbs", &*self.aabbs)?;
+            state.serialize_field("starts", &*self.starts)?;
+            let afforded_slices: Vec<&[A]> = self.afforded.iter().map(|a| &**a).collect();
+            state.serialize_field("afforded", &afforded_slices)?;
+            state.serialize_field("r_point", &self.r_point)?;
+            state.serialize_field("lanes_log2", &self.lanes_log2)?;
+            state.end()
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(bound(deserialize = "A: serde::Deserialize<'de> + Copy, I: serde::Deserialize<'de>"))]
+    struct CaptData<const K: usize, A, I> {
+        tests: Vec<A>,
+        aabbs: Vec<Aabb<A, K>>,
+        starts: Vec<I>,
+        afforded: Vec<Vec<A>>,
+        r_point: A,
+        lanes_log2: u32,
+    }
+
+    impl<'de, const K: usize, A, I> Deserialize<'de> for Capt<K, A, I>
+    where
+        A: Deserialize<'de> + Axis + Copy,
+        I: Deserialize<'de>,
+    {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let data = CaptData::<K, A, I>::deserialize(deserializer)?;
+
+            let n_lanes = 1usize << data.lanes_log2;
+            let layout = Layout::array::<A>(n_lanes).map_err(serde::de::Error::custom)?;
+            let alignment = max(layout.size(), layout.align());
+
+            let afforded_arr: [ABox<[A], RuntimeAlign>; K] = {
+                let afforded_vecs = data.afforded;
+                if afforded_vecs.len() != K {
+                    return Err(serde::de::Error::custom(
+                        alloc::format!("expected {K} afforded arrays, got {}", afforded_vecs.len()),
+                    ));
+                }
+                let mut iter = afforded_vecs.into_iter();
+                array::from_fn(|_| {
+                    let v = iter.next().unwrap();
+                    let mut avec = AVec::with_capacity(alignment, v.len());
+                    for val in v {
+                        avec.push(val);
+                    }
+                    avec.into_boxed_slice()
+                })
+            };
+
+            Ok(Self {
+                tests: data.tests.into_boxed_slice(),
+                aabbs: data.aabbs.into_boxed_slice(),
+                starts: data.starts.into_boxed_slice(),
+                afforded: afforded_arr,
+                r_point: data.r_point,
+                lanes_log2: data.lanes_log2,
+            })
+        }
     }
 }
 

@@ -10,6 +10,7 @@ use crate::{Bounded, Collides, Scalable, Transformable};
 use crate::{ConvexPolytope, Stretchable};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Cuboid {
     pub center: Vec3,
     pub axes: [Vec3; 3],
@@ -510,6 +511,7 @@ impl Collides<Cuboid> for Cuboid {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum CuboidStretch {
     Aligned(Cuboid),
     Unaligned(ConvexPolytope),

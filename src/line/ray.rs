@@ -15,6 +15,7 @@ const T_MAX: f32 = f32::INFINITY;
 
 /// A ray: `origin + t * dir` for `t ∈ [0, ∞)`.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Ray {
     pub origin: Vec3,
     pub dir: Vec3,
@@ -80,6 +81,7 @@ impl Transformable for Ray {
 const INF: f32 = 1e12;
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum RayStretch {
     Parallel(Ray),
     Polygon(ConvexPolygon),

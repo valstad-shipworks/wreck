@@ -12,6 +12,7 @@ use crate::{Bounded, Collides, Scalable, Sphere, Transformable};
 /// Padding slots use `r = -1.0` which guarantees `dist_sq <= (self.r + (-1))^2`
 /// is false for any reasonable query radius, preventing false positives.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SpheresSoA {
     pub x: Vec<f32>,
     pub y: Vec<f32>,
