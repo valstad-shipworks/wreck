@@ -103,31 +103,33 @@ impl Transformable for Pointcloud {
 impl Scalable for Pointcloud {
     pub fn scale(&mut self, factor: f32) {
         let n = self.point_count();
-        for i in 0..n {
-            self.spheres.x[i] *= factor;
-            self.spheres.y[i] *= factor;
-            self.spheres.z[i] *= factor;
-            self.spheres.r[i] *= factor;
+        {
+            let (xs, ys, zs, rs) = self.spheres.slices_mut();
+            for i in 0..n {
+                xs[i] *= factor;
+                ys[i] *= factor;
+                zs[i] *= factor;
+                rs[i] *= factor;
+            }
         }
         self.point_radius *= factor;
         self.r_range.0 *= factor;
         self.r_range.1 *= factor;
-        // Flush the lazy transform: apply it to points, then clear it
         if let Some(inv) = self.inverse_transform.take() {
             let fwd = inv.inverse();
+            let (xs, ys, zs, _) = self.spheres.slices_mut();
             for i in 0..n {
-                let v = fwd.transform_point3a(glam::Vec3A::new(
-                    self.spheres.x[i],
-                    self.spheres.y[i],
-                    self.spheres.z[i],
-                ));
-                self.spheres.x[i] = v.x;
-                self.spheres.y[i] = v.y;
-                self.spheres.z[i] = v.z;
+                let v = fwd.transform_point3a(glam::Vec3A::new(xs[i], ys[i], zs[i]));
+                xs[i] = v.x;
+                ys[i] = v.y;
+                zs[i] = v.z;
             }
         }
+        let xs = self.spheres.x();
+        let ys = self.spheres.y();
+        let zs = self.spheres.z();
         let points: Vec<[f32; 3]> = (0..n)
-            .map(|i| [self.spheres.x[i], self.spheres.y[i], self.spheres.z[i]])
+            .map(|i| [xs[i], ys[i], zs[i]])
             .collect();
         self.tree = capt::Capt::<3, f32, u32>::with_point_radius(
             &points,
@@ -147,8 +149,11 @@ impl Bounded for Pointcloud {
         }
         let mut min = Vec3::splat(f32::INFINITY);
         let mut max = Vec3::splat(f32::NEG_INFINITY);
+        let xs = self.spheres.x();
+        let ys = self.spheres.y();
+        let zs = self.spheres.z();
         for i in 0..n {
-            let v = Vec3::new(self.spheres.x[i], self.spheres.y[i], self.spheres.z[i]);
+            let v = Vec3::new(xs[i], ys[i], zs[i]);
             min = min.min(v);
             max = max.max(v);
         }
@@ -168,8 +173,11 @@ impl Bounded for Pointcloud {
         }
         let mut min = Vec3::splat(f32::INFINITY);
         let mut max = Vec3::splat(f32::NEG_INFINITY);
+        let xs = self.spheres.x();
+        let ys = self.spheres.y();
+        let zs = self.spheres.z();
         for i in 0..n {
-            let v = Vec3::new(self.spheres.x[i], self.spheres.y[i], self.spheres.z[i]);
+            let v = Vec3::new(xs[i], ys[i], zs[i]);
             min = min.min(v);
             max = max.max(v);
         }
@@ -247,20 +255,21 @@ impl Collides<Capsule> for Pointcloud {
         let one = f32x8::splat(1.0);
 
         let full_chunks = self.full_chunks();
+        let sxs = self.spheres.x();
+        let sys = self.spheres.y();
+        let szs = self.spheres.z();
         for i in 0..full_chunks {
             let base = i * 8;
-            let px = f32x8::new(self.spheres.x[base..base + 8].try_into().unwrap());
-            let py = f32x8::new(self.spheres.y[base..base + 8].try_into().unwrap());
-            let pz = f32x8::new(self.spheres.z[base..base + 8].try_into().unwrap());
+            let px = f32x8::new(sxs[base..base + 8].try_into().unwrap());
+            let py = f32x8::new(sys[base..base + 8].try_into().unwrap());
+            let pz = f32x8::new(szs[base..base + 8].try_into().unwrap());
 
-            // Project point onto capsule segment, clamp t
             let dfx = px - p1x;
             let dfy = py - p1y;
             let dfz = pz - p1z;
             let t = (dfx * dx + dfy * dy + dfz * dz) * rdv;
             let t = t.max(zero).min(one);
 
-            // Closest point on segment
             let cx = p1x + dx * t;
             let cy = p1y + dy * t;
             let cz = p1z + dz * t;
@@ -275,10 +284,9 @@ impl Collides<Capsule> for Pointcloud {
             }
         }
 
-        // Scalar remainder
         let r_total_sq_s = r_total * r_total;
         for i in self.remainder_start()..self.point_count() {
-            let p = Vec3::new(self.spheres.x[i], self.spheres.y[i], self.spheres.z[i]);
+            let p = Vec3::new(sxs[i], sys[i], szs[i]);
             let closest = capsule.closest_point_to(p);
             let d = p - closest;
             if d.dot(d) <= r_total_sq_s {
@@ -347,16 +355,18 @@ impl Collides<Cuboid> for Pointcloud {
         let axes_comp = [ax, ay, az];
 
         let full_chunks = self.full_chunks();
+        let sxs = self.spheres.x();
+        let sys = self.spheres.y();
+        let szs = self.spheres.z();
         for i in 0..full_chunks {
             let base = i * 8;
-            let dfx = f32x8::new(self.spheres.x[base..base + 8].try_into().unwrap()) - ccx;
-            let dfy = f32x8::new(self.spheres.y[base..base + 8].try_into().unwrap()) - ccy;
-            let dfz = f32x8::new(self.spheres.z[base..base + 8].try_into().unwrap()) - ccz;
+            let dfx = f32x8::new(sxs[base..base + 8].try_into().unwrap()) - ccx;
+            let dfy = f32x8::new(sys[base..base + 8].try_into().unwrap()) - ccy;
+            let dfz = f32x8::new(szs[base..base + 8].try_into().unwrap()) - ccz;
 
             let mut dist_sq = zero;
             for i in 0..3 {
                 let proj = dfx * axes_comp[i][0] + dfy * axes_comp[i][1] + dfz * axes_comp[i][2];
-                // abs via flip_signs trick: proj.abs() not available, use max(-proj, proj)
                 let abs_proj = proj.max(-proj);
                 let excess = (abs_proj - he[i]).max(zero);
                 dist_sq = dist_sq + excess * excess;
@@ -369,7 +379,7 @@ impl Collides<Cuboid> for Pointcloud {
 
         let r_sq_s = self.point_radius * self.point_radius;
         for i in self.remainder_start()..self.point_count() {
-            let p = Vec3::new(self.spheres.x[i], self.spheres.y[i], self.spheres.z[i]);
+            let p = Vec3::new(sxs[i], sys[i], szs[i]);
             if cuboid.point_dist_sq(p) <= r_sq_s {
                 return true;
             }
@@ -424,11 +434,14 @@ impl Collides<Cylinder> for Pointcloud {
         let four_cyl_r_sq = f32x8::splat(4.0 * cyl.radius * cyl.radius);
 
         let full_chunks = self.full_chunks();
+        let sxs = self.spheres.x();
+        let sys = self.spheres.y();
+        let szs = self.spheres.z();
         for i in 0..full_chunks {
             let base = i * 8;
-            let px = f32x8::new(self.spheres.x[base..base + 8].try_into().unwrap());
-            let py = f32x8::new(self.spheres.y[base..base + 8].try_into().unwrap());
-            let pz = f32x8::new(self.spheres.z[base..base + 8].try_into().unwrap());
+            let px = f32x8::new(sxs[base..base + 8].try_into().unwrap());
+            let py = f32x8::new(sys[base..base + 8].try_into().unwrap());
+            let pz = f32x8::new(szs[base..base + 8].try_into().unwrap());
 
             let wx = px - p1x8;
             let wy = py - p1y8;
@@ -442,11 +455,9 @@ impl Collides<Cylinder> for Pointcloud {
             let perpz = wz - dz8 * t;
             let r_sq = perpx * perpx + perpy * perpy + perpz * perpz;
 
-            // Barrel
             let in_barrel = zero.simd_le(t) & t.simd_le(one);
             let barrel_hit = in_barrel & r_sq.simd_le(r_total_sq8);
 
-            // End cap
             let t_excess = t - t_c;
             let d_axial_sq = t_excess * t_excess * dir_sq8;
 
@@ -464,7 +475,7 @@ impl Collides<Cylinder> for Pointcloud {
         }
 
         for i in self.remainder_start()..self.point_count() {
-            let p = Vec3::new(self.spheres.x[i], self.spheres.y[i], self.spheres.z[i]);
+            let p = Vec3::new(sxs[i], sys[i], szs[i]);
             if cyl.point_dist_sq(p) <= self.point_radius * self.point_radius {
                 return true;
             }
@@ -501,14 +512,15 @@ impl Pointcloud {
         let zero = f32x8::ZERO;
 
         let full_chunks = self.full_chunks();
+        let sxs = self.spheres.x();
+        let sys = self.spheres.y();
+        let szs = self.spheres.z();
         for i in 0..full_chunks {
             let base = i * 8;
-            let px = f32x8::new(self.spheres.x[base..base + 8].try_into().unwrap());
-            let py = f32x8::new(self.spheres.y[base..base + 8].try_into().unwrap());
-            let pz = f32x8::new(self.spheres.z[base..base + 8].try_into().unwrap());
+            let px = f32x8::new(sxs[base..base + 8].try_into().unwrap());
+            let py = f32x8::new(sys[base..base + 8].try_into().unwrap());
+            let pz = f32x8::new(szs[base..base + 8].try_into().unwrap());
 
-            // For each point, track max separation across all planes.
-            // A point is inside iff max_sep <= 0.
             let mut max_sep = f32x8::splat(f32::NEG_INFINITY);
             for &(normal, d) in polytope.planes {
                 let sep = f32x8::splat(normal.x) * px
@@ -524,10 +536,9 @@ impl Pointcloud {
             }
         }
 
-        // Scalar remainder
         let r_s = self.point_radius;
         for i in self.remainder_start()..self.point_count() {
-            let p = Vec3::new(self.spheres.x[i], self.spheres.y[i], self.spheres.z[i]);
+            let p = Vec3::new(sxs[i], sys[i], szs[i]);
             let mut inside = true;
             for &(normal, d) in polytope.planes {
                 if normal.dot(p) - d - r_s > 0.0 {
@@ -600,11 +611,14 @@ impl Collides<Plane> for Pointcloud {
         let threshold = f32x8::splat(d + self.point_radius);
 
         let full_chunks = self.full_chunks();
+        let sxs = self.spheres.x();
+        let sys = self.spheres.y();
+        let szs = self.spheres.z();
         for i in 0..full_chunks {
             let base = i * 8;
-            let proj = nx * f32x8::new(self.spheres.x[base..base + 8].try_into().unwrap())
-                + ny * f32x8::new(self.spheres.y[base..base + 8].try_into().unwrap())
-                + nz * f32x8::new(self.spheres.z[base..base + 8].try_into().unwrap());
+            let proj = nx * f32x8::new(sxs[base..base + 8].try_into().unwrap())
+                + ny * f32x8::new(sys[base..base + 8].try_into().unwrap())
+                + nz * f32x8::new(szs[base..base + 8].try_into().unwrap());
             if proj.simd_le(threshold).any() {
                 return true;
             }
@@ -612,7 +626,7 @@ impl Collides<Plane> for Pointcloud {
 
         let threshold_s = d + self.point_radius;
         for i in self.remainder_start()..self.point_count() {
-            let p = Vec3::new(self.spheres.x[i], self.spheres.y[i], self.spheres.z[i]);
+            let p = Vec3::new(sxs[i], sys[i], szs[i]);
             if normal.dot(p) <= threshold_s {
                 return true;
             }
@@ -640,8 +654,11 @@ impl Collides<ConvexPolygon> for Pointcloud {
         };
 
         let r_sq = self.point_radius * self.point_radius;
+        let sxs = self.spheres.x();
+        let sys = self.spheres.y();
+        let szs = self.spheres.z();
         for i in 0..self.point_count() {
-            let p = Vec3::new(self.spheres.x[i], self.spheres.y[i], self.spheres.z[i]);
+            let p = Vec3::new(sxs[i], sys[i], szs[i]);
             if polygon.point_dist_sq(p) <= r_sq {
                 return true;
             }
@@ -680,8 +697,11 @@ macro_rules! impl_line_pcl {
 
                 let r = self.point_radius;
                 let r_sq = r * r;
+                let sxs = self.spheres.x();
+                let sys = self.spheres.y();
+                let szs = self.spheres.z();
                 for i in 0..self.point_count() {
-                    let p = Vec3::new(self.spheres.x[i], self.spheres.y[i], self.spheres.z[i]);
+                    let p = Vec3::new(sxs[i], sys[i], szs[i]);
                     let t = crate::line::closest_t_to_point(origin, dir, rdv, p, $t_min, $t_max);
                     let closest = origin + dir * t;
                     let d = p - closest;

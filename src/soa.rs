@@ -7,18 +7,65 @@ use crate::{Bounded, Collides, Scalable, Sphere, Transformable};
 
 /// Structure-of-Arrays storage for spheres.
 ///
-/// Stores x, y, z, r in separate contiguous arrays, padded to a multiple of 16
-/// so SIMD loops never need a scalar remainder path (works for both 8-wide and 16-wide).
+/// Backed by a single contiguous allocation laid out as `[x; padded][y; padded][z; padded][r; padded]`
+/// so that all four channels share one cache-line neighbourhood.
+/// Each channel is padded to a multiple of 16 so SIMD loops never need a scalar
+/// remainder path (works for both 8-wide and 16-wide).
 /// Padding slots use `r = NaN` so that SIMD lane comparisons
 /// (`dist_sq <= (r_a + r_b)²`) always return false, preventing false positives.
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, PartialEq)]
 pub struct SpheresSoA {
-    pub x: Vec<f32>,
-    pub y: Vec<f32>,
-    pub z: Vec<f32>,
-    pub r: Vec<f32>,
+    buf: Vec<f32>,
+    padded: usize,
     len: usize,
+}
+
+impl Debug for SpheresSoA {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SpheresSoA")
+            .field("x", &self.x())
+            .field("y", &self.y())
+            .field("z", &self.z())
+            .field("r", &self.r())
+            .field("len", &self.len)
+            .finish()
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for SpheresSoA {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut s = serializer.serialize_struct("SpheresSoA", 5)?;
+        s.serialize_field("x", self.x())?;
+        s.serialize_field("y", self.y())?;
+        s.serialize_field("z", self.z())?;
+        s.serialize_field("r", self.r())?;
+        s.serialize_field("len", &self.len)?;
+        s.end()
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for SpheresSoA {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        struct Helper {
+            x: Vec<f32>,
+            y: Vec<f32>,
+            z: Vec<f32>,
+            r: Vec<f32>,
+            len: usize,
+        }
+        let h = Helper::deserialize(deserializer)?;
+        let padded = h.x.len();
+        let mut buf = Vec::with_capacity(4 * padded);
+        buf.extend_from_slice(&h.x);
+        buf.extend_from_slice(&h.y);
+        buf.extend_from_slice(&h.z);
+        buf.extend_from_slice(&h.r);
+        Ok(Self { buf, padded, len: h.len })
+    }
 }
 
 const PAD: usize = 16;
@@ -32,10 +79,8 @@ fn pad(n: usize) -> usize {
 impl SpheresSoA {
     pub fn new() -> Self {
         Self {
-            x: Vec::new(),
-            y: Vec::new(),
-            z: Vec::new(),
-            r: Vec::new(),
+            buf: Vec::new(),
+            padded: 0,
             len: 0,
         }
     }
@@ -43,10 +88,8 @@ impl SpheresSoA {
     pub fn with_capacity(cap: usize) -> Self {
         let padded = pad(cap);
         Self {
-            x: Vec::with_capacity(padded),
-            y: Vec::with_capacity(padded),
-            z: Vec::with_capacity(padded),
-            r: Vec::with_capacity(padded),
+            buf: Vec::with_capacity(4 * padded),
+            padded: 0,
             len: 0,
         }
     }
@@ -54,26 +97,49 @@ impl SpheresSoA {
     pub fn from_slice(spheres: &[Sphere]) -> Self {
         let len = spheres.len();
         let padded = pad(len);
-        let mut x = Vec::with_capacity(padded);
-        let mut y = Vec::with_capacity(padded);
-        let mut z = Vec::with_capacity(padded);
-        let mut r = Vec::with_capacity(padded);
+        let mut buf = vec![0.0f32; 4 * padded];
 
-        for s in spheres {
-            x.push(s.center.x);
-            y.push(s.center.y);
-            z.push(s.center.z);
-            r.push(s.radius);
+        for (i, s) in spheres.iter().enumerate() {
+            buf[i] = s.center.x;
+            buf[padded + i] = s.center.y;
+            buf[2 * padded + i] = s.center.z;
+            buf[3 * padded + i] = s.radius;
         }
 
-        for _ in len..padded {
-            x.push(0.0);
-            y.push(0.0);
-            z.push(0.0);
-            r.push(f32::NAN);
+        for i in len..padded {
+            buf[3 * padded + i] = f32::NAN;
         }
 
-        Self { x, y, z, r, len }
+        Self { buf, padded, len }
+    }
+
+    #[inline]
+    pub fn x(&self) -> &[f32] {
+        &self.buf[..self.padded]
+    }
+
+    #[inline]
+    pub fn y(&self) -> &[f32] {
+        &self.buf[self.padded..2 * self.padded]
+    }
+
+    #[inline]
+    pub fn z(&self) -> &[f32] {
+        &self.buf[2 * self.padded..3 * self.padded]
+    }
+
+    #[inline]
+    pub fn r(&self) -> &[f32] {
+        &self.buf[3 * self.padded..4 * self.padded]
+    }
+
+    #[inline]
+    pub fn slices_mut(&mut self) -> (&mut [f32], &mut [f32], &mut [f32], &mut [f32]) {
+        let p = self.padded;
+        let (x, rest) = self.buf.split_at_mut(p);
+        let (y, rest) = rest.split_at_mut(p);
+        let (z, r) = rest.split_at_mut(p);
+        (x, y, z, r)
     }
 
     #[inline]
@@ -87,17 +153,32 @@ impl SpheresSoA {
     }
 
     pub fn push(&mut self, sphere: Sphere) {
-        if self.len == self.x.len() {
-            self.x.extend_from_slice(&[0.0; PAD]);
-            self.y.extend_from_slice(&[0.0; PAD]);
-            self.z.extend_from_slice(&[0.0; PAD]);
-            self.r.extend_from_slice(&[f32::NAN; PAD]);
+        if self.len == self.padded {
+            self.grow();
         }
-        self.x[self.len] = sphere.center.x;
-        self.y[self.len] = sphere.center.y;
-        self.z[self.len] = sphere.center.z;
-        self.r[self.len] = sphere.radius;
+        let p = self.padded;
+        self.buf[self.len] = sphere.center.x;
+        self.buf[p + self.len] = sphere.center.y;
+        self.buf[2 * p + self.len] = sphere.center.z;
+        self.buf[3 * p + self.len] = sphere.radius;
         self.len += 1;
+    }
+
+    fn grow(&mut self) {
+        let old = self.padded;
+        let new = old + PAD;
+        let mut buf = vec![0.0f32; 4 * new];
+        if old > 0 {
+            buf[..old].copy_from_slice(&self.buf[..old]);
+            buf[new..new + old].copy_from_slice(&self.buf[old..2 * old]);
+            buf[2 * new..2 * new + old].copy_from_slice(&self.buf[2 * old..3 * old]);
+            buf[3 * new..3 * new + old].copy_from_slice(&self.buf[3 * old..4 * old]);
+        }
+        for i in old..new {
+            buf[3 * new + i] = f32::NAN;
+        }
+        self.buf = buf;
+        self.padded = new;
     }
 
     /// Moves all real entries from `other` into `self`, re-padding once.
@@ -105,30 +186,41 @@ impl SpheresSoA {
         if other.len == 0 {
             return;
         }
-        // Strip self's padding back to real length
-        self.x.truncate(self.len);
-        self.y.truncate(self.len);
-        self.z.truncate(self.len);
-        self.r.truncate(self.len);
-        // Move real entries from other
-        self.x.extend_from_slice(&other.x[..other.len]);
-        self.y.extend_from_slice(&other.y[..other.len]);
-        self.z.extend_from_slice(&other.z[..other.len]);
-        self.r.extend_from_slice(&other.r[..other.len]);
-        self.len += other.len;
-        // Re-pad to SIMD boundary
-        let padded = pad(self.len);
-        self.x.resize(padded, 0.0);
-        self.y.resize(padded, 0.0);
-        self.z.resize(padded, 0.0);
-        self.r.resize(padded, f32::NAN);
-        // Clear other
+        let new_len = self.len + other.len;
+        let new_padded = pad(new_len);
+        let mut buf = vec![0.0f32; 4 * new_padded];
+
+        let sp = self.padded;
+        let op = other.padded;
+        let sl = self.len;
+        let ol = other.len;
+
+        buf[..sl].copy_from_slice(&self.buf[..sl]);
+        buf[sl..sl + ol].copy_from_slice(&other.buf[..ol]);
+
+        buf[new_padded..new_padded + sl].copy_from_slice(&self.buf[sp..sp + sl]);
+        buf[new_padded + sl..new_padded + sl + ol].copy_from_slice(&other.buf[op..op + ol]);
+
+        buf[2 * new_padded..2 * new_padded + sl].copy_from_slice(&self.buf[2 * sp..2 * sp + sl]);
+        buf[2 * new_padded + sl..2 * new_padded + sl + ol].copy_from_slice(&other.buf[2 * op..2 * op + ol]);
+
+        buf[3 * new_padded..3 * new_padded + sl].copy_from_slice(&self.buf[3 * sp..3 * sp + sl]);
+        buf[3 * new_padded + sl..3 * new_padded + sl + ol].copy_from_slice(&other.buf[3 * op..3 * op + ol]);
+
+        for i in new_len..new_padded {
+            buf[3 * new_padded + i] = f32::NAN;
+        }
+
+        self.buf = buf;
+        self.padded = new_padded;
+        self.len = new_len;
         other.clear();
     }
 
     pub fn clear(&mut self) {
+        let p = self.padded;
         for i in 0..self.len {
-            self.r[i] = f32::NAN;
+            self.buf[3 * p + i] = f32::NAN;
         }
         self.len = 0;
     }
@@ -136,9 +228,10 @@ impl SpheresSoA {
     #[inline]
     pub fn get(&self, index: usize) -> Sphere {
         debug_assert!(index < self.len);
+        let p = self.padded;
         Sphere::new(
-            Vec3::new(self.x[index], self.y[index], self.z[index]),
-            self.r[index],
+            Vec3::new(self.buf[index], self.buf[p + index], self.buf[2 * p + index]),
+            self.buf[3 * p + index],
         )
     }
 
@@ -148,7 +241,7 @@ impl SpheresSoA {
 
     #[inline]
     pub(crate) fn chunk_count_8(&self) -> usize {
-        self.x.len() / 8
+        self.padded / 8
     }
 
     /// Test if any sphere in this SoA collides with the given sphere.
@@ -174,10 +267,10 @@ impl SpheresSoA {
         let cz = f32x8::splat(sphere.center.z);
         let sr = f32x8::splat(sphere.radius);
 
-        let xp = self.x.as_ptr();
-        let yp = self.y.as_ptr();
-        let zp = self.z.as_ptr();
-        let rp = self.r.as_ptr();
+        let xp = self.x().as_ptr();
+        let yp = self.y().as_ptr();
+        let zp = self.z().as_ptr();
+        let rp = self.r().as_ptr();
 
         for i in 0..self.chunk_count_8() {
             let base = i * 8;
@@ -241,19 +334,24 @@ impl SpheresSoA {
         let sr = f32x8::splat(query.radius);
         let mut any_hit = false;
 
+        let xs = self.x();
+        let ys = self.y();
+        let zs = self.z();
+        let rs = self.r();
+
         for i in 0..self.chunk_count_8() {
             let base = i * 8;
-            let ox = f32x8::new(self.x[base..base + 8].try_into().unwrap());
-            let oy = f32x8::new(self.y[base..base + 8].try_into().unwrap());
-            let oz = f32x8::new(self.z[base..base + 8].try_into().unwrap());
-            let or = f32x8::new(self.r[base..base + 8].try_into().unwrap());
+            let ox = f32x8::new(xs[base..base + 8].try_into().unwrap());
+            let oy = f32x8::new(ys[base..base + 8].try_into().unwrap());
+            let oz = f32x8::new(zs[base..base + 8].try_into().unwrap());
+            let or = f32x8::new(rs[base..base + 8].try_into().unwrap());
 
             let dx = cx - ox;
             let dy = cy - oy;
             let dz = cz - oz;
             let dist_sq = dx * dx + dy * dy + dz * dz;
-            let rs = sr + or;
-            let mask = dist_sq.simd_le(rs * rs).to_bitmask();
+            let rsum = sr + or;
+            let mask = dist_sq.simd_le(rsum * rsum).to_bitmask();
             if mask != 0 {
                 any_hit = true;
                 let end = (base + 8).min(self.len);
@@ -289,10 +387,15 @@ impl SpheresSoA {
 
     fn any_collides_soa_f32x8(&self, other: &SpheresSoA) -> bool {
         let other_chunks = other.chunk_count_8();
-        let oxp = other.x.as_ptr();
-        let oyp = other.y.as_ptr();
-        let ozp = other.z.as_ptr();
-        let orp = other.r.as_ptr();
+        let oxp = other.x().as_ptr();
+        let oyp = other.y().as_ptr();
+        let ozp = other.z().as_ptr();
+        let orp = other.r().as_ptr();
+
+        let sxp = self.x().as_ptr();
+        let syp = self.y().as_ptr();
+        let szp = self.z().as_ptr();
+        let srp = self.r().as_ptr();
 
         for i in 0..self.len {
             let cx;
@@ -300,10 +403,10 @@ impl SpheresSoA {
             let cz;
             let sr;
             unsafe {
-                cx = f32x8::splat(*self.x.as_ptr().add(i));
-                cy = f32x8::splat(*self.y.as_ptr().add(i));
-                cz = f32x8::splat(*self.z.as_ptr().add(i));
-                sr = f32x8::splat(*self.r.as_ptr().add(i));
+                cx = f32x8::splat(*sxp.add(i));
+                cy = f32x8::splat(*syp.add(i));
+                cz = f32x8::splat(*szp.add(i));
+                sr = f32x8::splat(*srp.add(i));
             }
 
             for j in 0..other_chunks {
@@ -380,11 +483,13 @@ impl SpheresSoA {
         let ox = f32x8::splat(offset.x);
         let oy = f32x8::splat(offset.y);
         let oz = f32x8::splat(offset.z);
-        let xp = self.x.as_mut_ptr();
-        let yp = self.y.as_mut_ptr();
-        let zp = self.z.as_mut_ptr();
+        let chunks = self.chunk_count_8();
+        let (xs, ys, zs, _) = self.slices_mut();
+        let xp = xs.as_mut_ptr();
+        let yp = ys.as_mut_ptr();
+        let zp = zs.as_mut_ptr();
 
-        for i in 0..self.chunk_count_8() {
+        for i in 0..chunks {
             let base = i * 8;
             unsafe {
                 let x = xp.add(base).cast::<[f32; 8]>();
@@ -407,11 +512,13 @@ impl SpheresSoA {
         let m20 = f32x8::splat(mat.x_axis.z);
         let m21 = f32x8::splat(mat.y_axis.z);
         let m22 = f32x8::splat(mat.z_axis.z);
-        let xp = self.x.as_mut_ptr();
-        let yp = self.y.as_mut_ptr();
-        let zp = self.z.as_mut_ptr();
+        let chunks = self.chunk_count_8();
+        let (xs, ys, zs, _) = self.slices_mut();
+        let xp = xs.as_mut_ptr();
+        let yp = ys.as_mut_ptr();
+        let zp = zs.as_mut_ptr();
 
-        for i in 0..self.chunk_count_8() {
+        for i in 0..chunks {
             let base = i * 8;
             unsafe {
                 let xsl = xp.add(base).cast::<[f32; 8]>();
@@ -441,11 +548,13 @@ impl SpheresSoA {
         let tx = f32x8::splat(mat.translation.x);
         let ty = f32x8::splat(mat.translation.y);
         let tz = f32x8::splat(mat.translation.z);
-        let xp = self.x.as_mut_ptr();
-        let yp = self.y.as_mut_ptr();
-        let zp = self.z.as_mut_ptr();
+        let chunks = self.chunk_count_8();
+        let (xs, ys, zs, _) = self.slices_mut();
+        let xp = xs.as_mut_ptr();
+        let yp = ys.as_mut_ptr();
+        let zp = zs.as_mut_ptr();
 
-        for i in 0..self.chunk_count_8() {
+        for i in 0..chunks {
             let base = i * 8;
             unsafe {
                 let xsl = xp.add(base).cast::<[f32; 8]>();
@@ -480,12 +589,14 @@ impl Scalable for SpheresSoA {
 impl SpheresSoA {
     fn scale_f32x8(&mut self, factor: f32) {
         let f = f32x8::splat(factor);
+        let chunks = self.chunk_count_8();
+        let (_, _, _, rs) = self.slices_mut();
 
-        for i in 0..self.chunk_count_8() {
+        for i in 0..chunks {
             let base = i * 8;
-            let r: [f32; 8] = self.r[base..base + 8].try_into().unwrap();
+            let r: [f32; 8] = rs[base..base + 8].try_into().unwrap();
             let scaled = f32x8::new(r) * f;
-            self.r[base..base + 8].copy_from_slice(scaled.as_array());
+            rs[base..base + 8].copy_from_slice(scaled.as_array());
         }
     }
 }
@@ -503,7 +614,7 @@ mod avx512 {
 
     #[inline]
     fn chunk_count_16(soa: &SpheresSoA) -> usize {
-        soa.x.len() / 16
+        soa.padded / 16
     }
 
     #[target_feature(enable = "avx512f")]
@@ -513,12 +624,17 @@ mod avx512 {
         let cz = _mm512_set1_ps(sphere.center.z);
         let sr = _mm512_set1_ps(sphere.radius);
 
+        let xs = soa.x();
+        let ys = soa.y();
+        let zs = soa.z();
+        let rs = soa.r();
+
         for i in 0..chunk_count_16(soa) {
             let base = i * 16;
-            let ox = _mm512_loadu_ps(soa.x[base..].as_ptr());
-            let oy = _mm512_loadu_ps(soa.y[base..].as_ptr());
-            let oz = _mm512_loadu_ps(soa.z[base..].as_ptr());
-            let or = _mm512_loadu_ps(soa.r[base..].as_ptr());
+            let ox = _mm512_loadu_ps(xs[base..].as_ptr());
+            let oy = _mm512_loadu_ps(ys[base..].as_ptr());
+            let oz = _mm512_loadu_ps(zs[base..].as_ptr());
+            let or = _mm512_loadu_ps(rs[base..].as_ptr());
 
             let dx = _mm512_sub_ps(cx, ox);
             let dy = _mm512_sub_ps(cy, oy);
@@ -526,8 +642,8 @@ mod avx512 {
 
             let dist_sq = _mm512_fmadd_ps(dz, dz, _mm512_fmadd_ps(dy, dy, _mm512_mul_ps(dx, dx)));
 
-            let rs = _mm512_add_ps(sr, or);
-            let rs_sq = _mm512_mul_ps(rs, rs);
+            let rsum = _mm512_add_ps(sr, or);
+            let rs_sq = _mm512_mul_ps(rsum, rsum);
 
             let mask = _mm512_cmp_ps_mask::<0x12>(dist_sq, rs_sq);
             if mask != 0 {
@@ -550,12 +666,17 @@ mod avx512 {
         let sr = _mm512_set1_ps(query.radius);
         let mut any_hit = false;
 
+        let xs = soa.x();
+        let ys = soa.y();
+        let zs = soa.z();
+        let rs = soa.r();
+
         for i in 0..chunk_count_16(soa) {
             let base = i * 16;
-            let ox = _mm512_loadu_ps(soa.x[base..].as_ptr());
-            let oy = _mm512_loadu_ps(soa.y[base..].as_ptr());
-            let oz = _mm512_loadu_ps(soa.z[base..].as_ptr());
-            let or = _mm512_loadu_ps(soa.r[base..].as_ptr());
+            let ox = _mm512_loadu_ps(xs[base..].as_ptr());
+            let oy = _mm512_loadu_ps(ys[base..].as_ptr());
+            let oz = _mm512_loadu_ps(zs[base..].as_ptr());
+            let or = _mm512_loadu_ps(rs[base..].as_ptr());
 
             let dx = _mm512_sub_ps(cx, ox);
             let dy = _mm512_sub_ps(cy, oy);
@@ -563,8 +684,8 @@ mod avx512 {
 
             let dist_sq = _mm512_fmadd_ps(dz, dz, _mm512_fmadd_ps(dy, dy, _mm512_mul_ps(dx, dx)));
 
-            let rs = _mm512_add_ps(sr, or);
-            let rs_sq = _mm512_mul_ps(rs, rs);
+            let rsum = _mm512_add_ps(sr, or);
+            let rs_sq = _mm512_mul_ps(rsum, rsum);
 
             let mask = _mm512_cmp_ps_mask::<0x12>(dist_sq, rs_sq);
             if mask != 0 {
@@ -584,19 +705,27 @@ mod avx512 {
     #[target_feature(enable = "avx512f")]
     pub(super) unsafe fn any_collides_soa_avx512(a: &SpheresSoA, b: &SpheresSoA) -> bool {
         let b_chunks = chunk_count_16(b);
+        let axs = a.x();
+        let ays = a.y();
+        let azs = a.z();
+        let ars = a.r();
+        let bxs = b.x();
+        let bys = b.y();
+        let bzs = b.z();
+        let brs = b.r();
 
         for i in 0..a.len {
-            let cx = _mm512_set1_ps(a.x[i]);
-            let cy = _mm512_set1_ps(a.y[i]);
-            let cz = _mm512_set1_ps(a.z[i]);
-            let sr = _mm512_set1_ps(a.r[i]);
+            let cx = _mm512_set1_ps(axs[i]);
+            let cy = _mm512_set1_ps(ays[i]);
+            let cz = _mm512_set1_ps(azs[i]);
+            let sr = _mm512_set1_ps(ars[i]);
 
             for j in 0..b_chunks {
                 let base = j * 16;
-                let ox = _mm512_loadu_ps(b.x[base..].as_ptr());
-                let oy = _mm512_loadu_ps(b.y[base..].as_ptr());
-                let oz = _mm512_loadu_ps(b.z[base..].as_ptr());
-                let or = _mm512_loadu_ps(b.r[base..].as_ptr());
+                let ox = _mm512_loadu_ps(bxs[base..].as_ptr());
+                let oy = _mm512_loadu_ps(bys[base..].as_ptr());
+                let oz = _mm512_loadu_ps(bzs[base..].as_ptr());
+                let or = _mm512_loadu_ps(brs[base..].as_ptr());
 
                 let dx = _mm512_sub_ps(cx, ox);
                 let dy = _mm512_sub_ps(cy, oy);
@@ -605,8 +734,8 @@ mod avx512 {
                 let dist_sq =
                     _mm512_fmadd_ps(dz, dz, _mm512_fmadd_ps(dy, dy, _mm512_mul_ps(dx, dx)));
 
-                let rs = _mm512_add_ps(sr, or);
-                let rs_sq = _mm512_mul_ps(rs, rs);
+                let rsum = _mm512_add_ps(sr, or);
+                let rs_sq = _mm512_mul_ps(rsum, rsum);
 
                 let mask = _mm512_cmp_ps_mask::<0x12>(dist_sq, rs_sq);
                 if mask != 0 {
@@ -623,12 +752,14 @@ mod avx512 {
         let ox = _mm512_set1_ps(offset.x);
         let oy = _mm512_set1_ps(offset.y);
         let oz = _mm512_set1_ps(offset.z);
+        let chunks = chunk_count_16(soa);
+        let (xs, ys, zs, _) = soa.slices_mut();
 
-        for i in 0..chunk_count_16(soa) {
+        for i in 0..chunks {
             let base = i * 16;
-            let xp = soa.x[base..].as_mut_ptr();
-            let yp = soa.y[base..].as_mut_ptr();
-            let zp = soa.z[base..].as_mut_ptr();
+            let xp = xs[base..].as_mut_ptr();
+            let yp = ys[base..].as_mut_ptr();
+            let zp = zs[base..].as_mut_ptr();
             _mm512_storeu_ps(xp, _mm512_add_ps(_mm512_loadu_ps(xp), ox));
             _mm512_storeu_ps(yp, _mm512_add_ps(_mm512_loadu_ps(yp), oy));
             _mm512_storeu_ps(zp, _mm512_add_ps(_mm512_loadu_ps(zp), oz));
@@ -638,10 +769,12 @@ mod avx512 {
     #[target_feature(enable = "avx512f")]
     pub(super) unsafe fn scale_avx512(soa: &mut SpheresSoA, factor: f32) {
         let f = _mm512_set1_ps(factor);
+        let chunks = chunk_count_16(soa);
+        let (_, _, _, rs) = soa.slices_mut();
 
-        for i in 0..chunk_count_16(soa) {
+        for i in 0..chunks {
             let base = i * 16;
-            let rp = soa.r[base..].as_mut_ptr();
+            let rp = rs[base..].as_mut_ptr();
             _mm512_storeu_ps(rp, _mm512_mul_ps(_mm512_loadu_ps(rp), f));
         }
     }
@@ -657,12 +790,14 @@ mod avx512 {
         let m20 = _mm512_set1_ps(mat.x_axis.z);
         let m21 = _mm512_set1_ps(mat.y_axis.z);
         let m22 = _mm512_set1_ps(mat.z_axis.z);
+        let chunks = chunk_count_16(soa);
+        let (xs, ys, zs, _) = soa.slices_mut();
 
-        for i in 0..chunk_count_16(soa) {
+        for i in 0..chunks {
             let base = i * 16;
-            let xp = soa.x[base..].as_mut_ptr();
-            let yp = soa.y[base..].as_mut_ptr();
-            let zp = soa.z[base..].as_mut_ptr();
+            let xp = xs[base..].as_mut_ptr();
+            let yp = ys[base..].as_mut_ptr();
+            let zp = zs[base..].as_mut_ptr();
             let x = _mm512_loadu_ps(xp);
             let y = _mm512_loadu_ps(yp);
             let z = _mm512_loadu_ps(zp);
@@ -692,28 +827,21 @@ mod avx512 {
         let tx = _mm512_set1_ps(mat.translation.x);
         let ty = _mm512_set1_ps(mat.translation.y);
         let tz = _mm512_set1_ps(mat.translation.z);
+        let chunks = chunk_count_16(soa);
+        let (xs, ys, zs, _) = soa.slices_mut();
 
-        for i in 0..chunk_count_16(soa) {
+        for i in 0..chunks {
             let base = i * 16;
-            let xp = soa.x[base..].as_mut_ptr();
-            let yp = soa.y[base..].as_mut_ptr();
-            let zp = soa.z[base..].as_mut_ptr();
+            let xp = xs[base..].as_mut_ptr();
+            let yp = ys[base..].as_mut_ptr();
+            let zp = zs[base..].as_mut_ptr();
             let x = _mm512_loadu_ps(xp);
             let y = _mm512_loadu_ps(yp);
             let z = _mm512_loadu_ps(zp);
 
-            let nx = _mm512_add_ps(
-                _mm512_fmadd_ps(m02, z, _mm512_fmadd_ps(m01, y, _mm512_mul_ps(m00, x))),
-                tx,
-            );
-            let ny = _mm512_add_ps(
-                _mm512_fmadd_ps(m12, z, _mm512_fmadd_ps(m11, y, _mm512_mul_ps(m10, x))),
-                ty,
-            );
-            let nz = _mm512_add_ps(
-                _mm512_fmadd_ps(m22, z, _mm512_fmadd_ps(m21, y, _mm512_mul_ps(m20, x))),
-                tz,
-            );
+            let nx = _mm512_fmadd_ps(m02, z, _mm512_fmadd_ps(m01, y, _mm512_fmadd_ps(m00, x, tx)));
+            let ny = _mm512_fmadd_ps(m12, z, _mm512_fmadd_ps(m11, y, _mm512_fmadd_ps(m10, x, ty)));
+            let nz = _mm512_fmadd_ps(m22, z, _mm512_fmadd_ps(m21, y, _mm512_fmadd_ps(m20, x, tz)));
 
             _mm512_storeu_ps(xp, nx);
             _mm512_storeu_ps(yp, ny);
@@ -1262,10 +1390,10 @@ pub(crate) mod batch {
         let nz = f32x8::splat(plane.normal.z);
         let d = f32x8::splat(plane.d);
         let zero = f32x8::ZERO;
-        let xp = soa.x.as_ptr();
-        let yp = soa.y.as_ptr();
-        let zp = soa.z.as_ptr();
-        let rp = soa.r.as_ptr();
+        let xp = soa.x().as_ptr();
+        let yp = soa.y().as_ptr();
+        let zp = soa.z().as_ptr();
+        let rp = soa.r().as_ptr();
 
         for i in 0..soa.chunk_count_8() {
             let base = i * 8;
@@ -1302,10 +1430,10 @@ pub(crate) mod batch {
         let rdv8 = f32x8::splat(rdv);
         let lo = f32x8::splat(t_min);
         let hi = f32x8::splat(t_max);
-        let xp = soa.x.as_ptr();
-        let yp = soa.y.as_ptr();
-        let zp = soa.z.as_ptr();
-        let rp = soa.r.as_ptr();
+        let xp = soa.x().as_ptr();
+        let yp = soa.y().as_ptr();
+        let zp = soa.z().as_ptr();
+        let rp = soa.r().as_ptr();
 
         for i in 0..soa.chunk_count_8() {
             let base = i * 8;
