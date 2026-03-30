@@ -113,6 +113,26 @@ impl SpheresSoA {
         Self { buf, padded, len }
     }
 
+    pub fn from_bounded<T: Bounded>(items: &[T]) -> Self {
+        let len = items.len();
+        let padded = pad(len);
+        let mut buf = vec![0.0f32; 4 * padded];
+
+        for (i, item) in items.iter().enumerate() {
+            let bp = item.broadphase();
+            buf[i] = bp.center.x;
+            buf[padded + i] = bp.center.y;
+            buf[2 * padded + i] = bp.center.z;
+            buf[3 * padded + i] = bp.radius;
+        }
+
+        for i in len..padded {
+            buf[3 * padded + i] = f32::NAN;
+        }
+
+        Self { buf, padded, len }
+    }
+
     #[inline]
     pub fn x(&self) -> &[f32] {
         &self.buf[..self.padded]
@@ -894,12 +914,7 @@ where
     T: Bounded + Transformable + Scalable + Debug + Clone + Sized,
 {
     pub fn new(items: Vec<T>) -> Self {
-        let broad = SpheresSoA::from_slice(
-            &items
-                .iter()
-                .map(|item| item.broadphase())
-                .collect::<Vec<_>>(),
-        );
+        let broad = SpheresSoA::from_bounded(&items);
         Self { items, broad }
     }
 
@@ -1413,6 +1428,7 @@ pub(crate) mod batch {
         false
     }
 
+    #[inline]
     fn line_vs_spheres_soa_inner(
         origin: Vec3,
         dir: Vec3,
@@ -1466,6 +1482,7 @@ pub(crate) mod batch {
         false
     }
 
+    #[inline]
     pub fn line_vs_spheres_soa(line: &Line, soa: &SpheresSoA) -> bool {
         line_vs_spheres_soa_inner(
             line.origin,
@@ -1477,10 +1494,12 @@ pub(crate) mod batch {
         )
     }
 
+    #[inline]
     pub fn ray_vs_spheres_soa(ray: &Ray, soa: &SpheresSoA) -> bool {
         line_vs_spheres_soa_inner(ray.origin, ray.dir, ray.rdv, 0.0, f32::INFINITY, soa)
     }
 
+    #[inline]
     pub fn segment_vs_spheres_soa(seg: &LineSegment, soa: &SpheresSoA) -> bool {
         line_vs_spheres_soa_inner(seg.p1, seg.dir, seg.rdv, 0.0, 1.0, soa)
     }

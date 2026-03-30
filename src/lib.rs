@@ -746,6 +746,9 @@ impl<PCL: PointCloudMarker> Collider<PCL> {
         if self.mask == 0 {
             return false;
         }
+        if self.mask & (Self::MASK_PLANES | Self::MASK_LINES | Self::MASK_RAYS) != 0 {
+            return true;
+        }
         (self.mask & Self::MASK_SPHERES != 0 && self.spheres.any_collides_sphere(query))
             || (self.mask & Self::MASK_CAPSULES != 0 && self.capsules.broad.any_collides_sphere(query))
             || (self.mask & Self::MASK_CUBOIDS != 0 && self.cuboids.broad.any_collides_sphere(query))
@@ -755,9 +758,6 @@ impl<PCL: PointCloudMarker> Collider<PCL> {
             || (self.mask & Self::MASK_POINTS != 0 && self.points.broad.any_collides_sphere(query))
             || (self.mask & Self::MASK_SEGMENTS != 0 && self.segments.broad.any_collides_sphere(query))
             || (self.mask & Self::MASK_POINTCLOUDS != 0 && self.pointclouds.broad.any_collides_sphere(query))
-            || self.mask & Self::MASK_PLANES != 0
-            || self.mask & Self::MASK_LINES != 0
-            || self.mask & Self::MASK_RAYS != 0
     }
 
     pub fn capsules(&self) -> &[Capsule] {
@@ -800,6 +800,7 @@ impl<PCL: PointCloudMarker> Collider<PCL> {
     /// Collision test — dispatches to SIMD-accelerated batch paths when
     /// available for the concrete query type, otherwise broadphase + scalar
     /// narrowphase via [`BroadCollection`].
+    #[inline]
     #[must_use]
     pub fn collides<T: ColliderQuery<PCL>>(&self, shape: &T) -> bool {
         shape.query_collider(self)
@@ -1074,7 +1075,11 @@ macro_rules! impl_collider_collides_other {
                 // Check each collider's bounding sphere against the other's
                 // per-shape broadphase SoA — if neither can see the other,
                 // no individual shape pair can collide.
-                if !other.broad_overlaps_any(&self.bounding)
+                // Skip when both colliders hold a single shape type: the
+                // top-level bounding-sphere test already covers that case.
+                let single_type = |m: u16| m & (m - 1) == 0;
+                if !(single_type(self.mask) && single_type(other.mask))
+                    && !other.broad_overlaps_any(&self.bounding)
                     && !self.broad_overlaps_any(&other.bounding)
                 {
                     return false;
