@@ -1,3 +1,5 @@
+use std::fmt;
+
 use glam::Vec3;
 
 use inherent::inherent;
@@ -492,5 +494,17 @@ impl Collides<ConvexPolygon> for Plane {
 impl Collides<ConvexPolygon> for ConvexPolygon {
     fn test<const BROADPHASE: bool>(&self, other: &ConvexPolygon) -> bool {
         ref_polygon_polygon_collides(&self.as_ref(), &other.as_ref())
+    }
+}
+
+impl fmt::Display for ConvexPolygon {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let c = self.center;
+        let n = self.normal;
+        write!(
+            f,
+            "ConvexPolygon(center: [{}, {}, {}], normal: [{}, {}, {}], vertices: {})",
+            c.x, c.y, c.z, n.x, n.y, n.z, self.vertices_2d.len()
+        )
     }
 }

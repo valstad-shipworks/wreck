@@ -1,3 +1,5 @@
+use std::fmt;
+
 use glam::Vec3;
 
 use inherent::inherent;
@@ -209,5 +211,11 @@ impl Collides<Point> for LineSegment {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, _other: &Point) -> bool {
         false
+    }
+}
+
+impl fmt::Display for Point {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Point([{}, {}, {}])", self.0.x, self.0.y, self.0.z)
     }
 }

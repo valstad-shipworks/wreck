@@ -1,3 +1,5 @@
+use std::fmt;
+
 use glam::Vec3;
 
 use inherent::inherent;
@@ -258,5 +260,17 @@ impl Collides<Line> for ConvexPolygon {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, line: &Line) -> bool {
         line.test::<BROADPHASE>(self)
+    }
+}
+
+impl fmt::Display for Line {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let o = self.origin;
+        let d = self.dir;
+        write!(
+            f,
+            "Line(origin: [{}, {}, {}], dir: [{}, {}, {}])",
+            o.x, o.y, o.z, d.x, d.y, d.z
+        )
     }
 }

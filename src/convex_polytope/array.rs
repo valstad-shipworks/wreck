@@ -1,3 +1,5 @@
+use std::fmt;
+
 use glam::Vec3;
 
 use inherent::inherent;
@@ -188,5 +190,15 @@ impl<const P: usize, const V: usize> Stretchable for ArrayConvexPolytope<P, V> {
     fn stretch(&self, translation: Vec3) -> Self::Output {
         let heap = ConvexPolytope::with_obb(self.planes.to_vec(), self.vertices.to_vec(), self.obb);
         heap.stretch(translation)
+    }
+}
+
+impl<const P: usize, const V: usize> fmt::Display for ArrayConvexPolytope<P, V> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "ArrayConvexPolytope(planes: {}, vertices: {})",
+            P, V
+        )
     }
 }

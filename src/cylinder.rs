@@ -1,4 +1,6 @@
-use glam::Vec3;
+use std::fmt;
+
+use glam::{DMat3, DVec3, Vec3};
 use wide::{CmpLe, f32x8};
 
 use inherent::inherent;
@@ -44,6 +46,49 @@ impl Cylinder {
         }
     }
 
+    /// Create a `Cylinder` from center, orientation (DMat3), radius, and length.
+    /// The cylinder axis is along the orientation's Y column.
+    pub fn from_center_orientation(
+        center: DVec3,
+        orientation: DMat3,
+        radius: f64,
+        length: f64,
+    ) -> Self {
+        let half_axis = orientation * DVec3::new(0.0, length * 0.5, 0.0);
+        let p1 = (center - half_axis).as_vec3();
+        let p2 = (center + half_axis).as_vec3();
+        Self::new(p1, p2, radius as f32)
+    }
+
+    /// Extract center, orientation (DMat3), and length from this cylinder.
+    pub fn to_center_orientation_length(&self) -> (DVec3, DMat3, f64) {
+        let p1 = self.p1.as_dvec3();
+        let p2 = self.p2().as_dvec3();
+        let center = (p1 + p2) * 0.5;
+        let dir = p2 - p1;
+        let length = dir.length();
+        let orientation = if length > f64::EPSILON {
+            let y_axis = dir / length;
+            let arbitrary = if y_axis.dot(DVec3::X).abs() < 0.9 {
+                DVec3::X
+            } else {
+                DVec3::Z
+            };
+            let x_axis = y_axis.cross(arbitrary).normalize();
+            let z_axis = x_axis.cross(y_axis).normalize();
+            DMat3::from_cols(x_axis, y_axis, z_axis)
+        } else {
+            DMat3::IDENTITY
+        };
+        (center, orientation, length)
+    }
+
+    /// Returns the length of the cylinder's central axis.
+    #[inline]
+    pub fn length(&self) -> f32 {
+        self.dir.length()
+    }
+
     #[inline]
     pub fn p2(&self) -> Vec3 {
         self.p1 + self.dir
@@ -85,7 +130,7 @@ impl Cylinder {
 
     /// Returns true if the point lies inside or on the cylinder surface.
     #[inline]
-    pub(crate) fn contains_point(&self, p: Vec3) -> bool {
+    pub fn contains_point(&self, p: Vec3) -> bool {
         let w = p - self.p1;
         let t = w.dot(self.dir) * self.rdv;
         if t < 0.0 || t > 1.0 {
@@ -926,5 +971,17 @@ impl Stretchable for Cylinder {
         let obb = Cuboid::new(obb_center, obb_axes, obb_he);
 
         CylinderStretch::Unaligned(edges, ConvexPolytope::with_obb(planes, vertices, obb))
+    }
+}
+
+impl fmt::Display for Cylinder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let p1 = self.p1;
+        let p2 = self.p2();
+        write!(
+            f,
+            "Cylinder(p1: [{}, {}, {}], p2: [{}, {}, {}], radius: {})",
+            p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, self.radius
+        )
     }
 }

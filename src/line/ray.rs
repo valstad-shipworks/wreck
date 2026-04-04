@@ -1,3 +1,5 @@
+use std::fmt;
+
 use glam::Vec3;
 
 use inherent::inherent;
@@ -259,5 +261,17 @@ impl Collides<Ray> for ConvexPolygon {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, ray: &Ray) -> bool {
         ray.test::<BROADPHASE>(self)
+    }
+}
+
+impl fmt::Display for Ray {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let o = self.origin;
+        let d = self.dir;
+        write!(
+            f,
+            "Ray(origin: [{}, {}, {}], dir: [{}, {}, {}])",
+            o.x, o.y, o.z, d.x, d.y, d.z
+        )
     }
 }

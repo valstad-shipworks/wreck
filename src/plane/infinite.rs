@@ -1,3 +1,5 @@
+use std::fmt;
+
 use glam::Vec3;
 
 use inherent::inherent;
@@ -215,5 +217,16 @@ impl Collides<Plane> for Plane {
         }
         // Antiparallel: half-spaces overlap iff d1 + d2 >= 0
         self.d + other.d >= 0.0
+    }
+}
+
+impl fmt::Display for Plane {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let n = self.normal;
+        write!(
+            f,
+            "Plane(normal: [{}, {}, {}], d: {})",
+            n.x, n.y, n.z, self.d
+        )
     }
 }

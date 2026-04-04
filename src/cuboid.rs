@@ -1,4 +1,6 @@
-use glam::Vec3;
+use std::fmt;
+
+use glam::{DMat3, DVec3, Vec3};
 use wide::{CmpLe, f32x8};
 
 use inherent::inherent;
@@ -67,6 +69,73 @@ impl Cuboid {
         }
     }
 
+    /// Create a `Cuboid` from center (DVec3), full-extents tuple, and a rotation matrix.
+    pub fn from_center_size_orientation(
+        center: DVec3,
+        size: (f64, f64, f64),
+        orientation: DMat3,
+    ) -> Self {
+        let axes = [
+            Vec3::from(orientation.col(0).as_vec3()),
+            Vec3::from(orientation.col(1).as_vec3()),
+            Vec3::from(orientation.col(2).as_vec3()),
+        ];
+        Self::new(
+            center.as_vec3(),
+            axes,
+            [
+                size.0 as f32 * 0.5,
+                size.1 as f32 * 0.5,
+                size.2 as f32 * 0.5,
+            ],
+        )
+    }
+
+    /// Extract the orientation as a DMat3 from this cuboid's axes.
+    pub fn orientation_as_dmat3(&self) -> DMat3 {
+        DMat3::from_cols(
+            self.axes[0].as_dvec3(),
+            self.axes[1].as_dvec3(),
+            self.axes[2].as_dvec3(),
+        )
+    }
+
+    /// Extract full-extents as an (f64, f64, f64) tuple.
+    pub fn full_size(&self) -> (f64, f64, f64) {
+        (
+            self.half_extents[0] as f64 * 2.0,
+            self.half_extents[1] as f64 * 2.0,
+            self.half_extents[2] as f64 * 2.0,
+        )
+    }
+
+    /// Compute the 8 corners of this cuboid.
+    pub fn corners(&self) -> [DVec3; 8] {
+        let center = self.center.as_dvec3();
+        let he = self.half_extents;
+        let axes = [
+            self.axes[0].as_dvec3(),
+            self.axes[1].as_dvec3(),
+            self.axes[2].as_dvec3(),
+        ];
+        let signs: [(f64, f64, f64); 8] = [
+            (-1.0, -1.0, -1.0),
+            (-1.0, -1.0, 1.0),
+            (-1.0, 1.0, -1.0),
+            (-1.0, 1.0, 1.0),
+            (1.0, -1.0, -1.0),
+            (1.0, -1.0, 1.0),
+            (1.0, 1.0, -1.0),
+            (1.0, 1.0, 1.0),
+        ];
+        signs.map(|(sx, sy, sz)| {
+            center
+                + axes[0] * (sx * he[0] as f64)
+                + axes[1] * (sy * he[1] as f64)
+                + axes[2] * (sz * he[2] as f64)
+        })
+    }
+
     #[inline]
     pub fn bounding_sphere_radius(&self) -> f32 {
         let e = self.half_extents;
@@ -75,7 +144,7 @@ impl Cuboid {
 
     /// Squared distance from a point to the closest point on this cuboid's surface/interior.
     #[inline]
-    pub(crate) fn point_dist_sq(&self, point: Vec3) -> f32 {
+    pub fn point_dist_sq(&self, point: Vec3) -> f32 {
         if self.axis_aligned {
             return self.point_dist_sq_aa(point);
         }
@@ -107,7 +176,7 @@ impl Cuboid {
 }
 
 impl Cuboid {
-    pub(crate) const fn contains_point(&self, point: Vec3) -> bool {
+    pub const fn contains_point(&self, point: Vec3) -> bool {
         let d = Vec3::new(
             (point.x - self.center.x).abs(),
             (point.y - self.center.y).abs(),
@@ -579,5 +648,17 @@ impl Stretchable for Cuboid {
         }
 
         CuboidStretch::Unaligned(ConvexPolytope::with_obb(planes, vertices, obb))
+    }
+}
+
+impl fmt::Display for Cuboid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let c = self.center;
+        let he = self.half_extents;
+        write!(
+            f,
+            "Cuboid(center: [{}, {}, {}], half_extents: [{}, {}, {}])",
+            c.x, c.y, c.z, he[0], he[1], he[2]
+        )
     }
 }

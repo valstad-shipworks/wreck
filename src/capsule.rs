@@ -1,4 +1,6 @@
-use glam::Vec3;
+use std::fmt;
+
+use glam::{DMat3, DVec3, Vec3};
 
 use inherent::inherent;
 
@@ -39,6 +41,54 @@ impl Capsule {
             rdv,
             z_aligned,
         }
+    }
+
+    /// Creates a new capsule, casting double-precision inputs to single-precision.
+    pub fn new_d(p1: DVec3, p2: DVec3, radius: f64) -> Self {
+        Self::new(p1.as_vec3(), p2.as_vec3(), radius as f32)
+    }
+
+    /// Create a `Capsule` from center, orientation (DMat3), radius, and length.
+    /// The capsule axis is along the orientation's Y column.
+    pub fn from_center_orientation(
+        center: DVec3,
+        orientation: DMat3,
+        radius: f64,
+        length: f64,
+    ) -> Self {
+        let half_axis = orientation * DVec3::new(0.0, length * 0.5, 0.0);
+        let p1 = (center - half_axis).as_vec3();
+        let p2 = (center + half_axis).as_vec3();
+        Self::new(p1, p2, radius as f32)
+    }
+
+    /// Extract center, orientation (DMat3), and length from this capsule.
+    pub fn to_center_orientation_length(&self) -> (DVec3, DMat3, f64) {
+        let p1 = self.p1.as_dvec3();
+        let p2 = self.p2().as_dvec3();
+        let center = (p1 + p2) * 0.5;
+        let dir = p2 - p1;
+        let length = dir.length();
+        let orientation = if length > f64::EPSILON {
+            let y_axis = dir / length;
+            let arbitrary = if y_axis.dot(DVec3::X).abs() < 0.9 {
+                DVec3::X
+            } else {
+                DVec3::Z
+            };
+            let x_axis = y_axis.cross(arbitrary).normalize();
+            let z_axis = x_axis.cross(y_axis).normalize();
+            DMat3::from_cols(x_axis, y_axis, z_axis)
+        } else {
+            DMat3::IDENTITY
+        };
+        (center, orientation, length)
+    }
+
+    /// Returns the length of the capsule's central axis.
+    #[inline]
+    pub fn length(&self) -> f32 {
+        self.dir.length()
     }
 
     #[inline]
@@ -333,5 +383,17 @@ impl Stretchable for Capsule {
         let obb = Cuboid::new(obb_center, obb_axes, obb_he);
 
         CapsuleStretch::Unaligned(edges, ConvexPolytope::with_obb(planes, vertices, obb))
+    }
+}
+
+impl fmt::Display for Capsule {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let p1 = self.p1;
+        let p2 = self.p2();
+        write!(
+            f,
+            "Capsule(p1: [{}, {}, {}], p2: [{}, {}, {}], radius: {})",
+            p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, self.radius
+        )
     }
 }

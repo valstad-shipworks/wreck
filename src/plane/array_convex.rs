@@ -1,3 +1,5 @@
+use std::fmt;
+
 use glam::Vec3;
 
 use inherent::inherent;
@@ -576,5 +578,17 @@ mod tests {
         for s in &test_spheres {
             assert_eq!(UNIT_SQUARE.collides(s), heap.collides(s));
         }
+    }
+}
+
+impl<const V: usize> fmt::Display for ArrayConvexPolygon<V> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let c = self.center;
+        let n = self.normal;
+        write!(
+            f,
+            "ArrayConvexPolygon(center: [{}, {}, {}], normal: [{}, {}, {}], vertices: {})",
+            c.x, c.y, c.z, n.x, n.y, n.z, V
+        )
     }
 }

@@ -30,13 +30,9 @@ pub use cuboid::Cuboid;
 pub use cylinder::Cylinder;
 pub use line::Line;
 pub use line::LineSegment;
-pub use line::LineSegmentStretch;
-pub use line::LineStretch;
 pub use line::Ray;
-pub use line::RayStretch;
 pub use plane::ArrayConvexPolygon;
 pub use plane::ConvexPolygon;
-pub use plane::ConvexPolygonStretch;
 pub use plane::Plane;
 pub use point::Point;
 pub use pointcloud::Pointcloud;
@@ -46,6 +42,7 @@ pub use crate::pointcloud::NoPcl;
 use crate::pointcloud::PointCloudMarker;
 
 pub mod stretched {
+    pub use crate::sphere::SphereStretch;
     pub use crate::capsule::CapsuleStretch;
     pub use crate::cuboid::CuboidStretch;
     pub use crate::cylinder::CylinderStretch;

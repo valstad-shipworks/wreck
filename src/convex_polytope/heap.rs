@@ -1,3 +1,5 @@
+use std::fmt;
+
 use glam::Vec3;
 
 use inherent::inherent;
@@ -259,4 +261,15 @@ fn stretch_obb(obb: &Cuboid, translation: Vec3) -> Cuboid {
         result.half_extents[i] += translation.dot(obb.axes[i]).abs() * 0.5;
     }
     result
+}
+
+impl fmt::Display for ConvexPolytope {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "ConvexPolytope(planes: {}, vertices: {})",
+            self.planes.len(),
+            self.vertices.len()
+        )
+    }
 }

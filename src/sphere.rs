@@ -1,3 +1,5 @@
+use std::fmt;
+
 use glam::{DVec3, Vec3};
 
 use inherent::inherent;
@@ -29,6 +31,12 @@ impl Sphere {
             },
             radius: radius as f32,
         }
+    }
+
+    /// Returns the diameter of the sphere.
+    #[inline]
+    pub fn diameter(&self) -> f32 {
+        self.radius * 2.0
     }
 }
 
@@ -107,5 +115,16 @@ impl Stretchable for Sphere {
             self.center + translation,
             self.radius,
         ))
+    }
+}
+
+impl fmt::Display for Sphere {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let c = self.center;
+        write!(
+            f,
+            "Sphere(center: [{}, {}, {}], radius: {})",
+            c.x, c.y, c.z, self.radius
+        )
     }
 }
