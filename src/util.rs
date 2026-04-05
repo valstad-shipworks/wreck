@@ -87,3 +87,27 @@ pub(crate) fn clamped_line_segment_dist_sq(
 pub(crate) const fn dot(a: glam::Vec3, b: glam::Vec3) -> f32 {
     a.x * b.x + a.y * b.y + a.z * b.z
 }
+
+#[cfg(not(feature = "std"))]
+pub(crate) trait F32Ext {
+    fn sqrt(self) -> f32;
+    fn sin(self) -> f32;
+    fn cos(self) -> f32;
+    fn sin_cos(self) -> (f32, f32);
+    fn atan2(self, other: f32) -> f32;
+}
+
+#[cfg(not(feature = "std"))]
+impl F32Ext for f32 {
+    #[inline]
+    fn sqrt(self) -> f32 { libm::sqrtf(self) }
+    #[inline]
+    fn sin(self) -> f32 { libm::sinf(self) }
+    #[inline]
+    fn cos(self) -> f32 { libm::cosf(self) }
+    #[inline]
+    fn sin_cos(self) -> (f32, f32) { libm::sincosf(self) }
+    #[inline]
+    fn atan2(self, other: f32) -> f32 { libm::atan2f(self, other) }
+}
+

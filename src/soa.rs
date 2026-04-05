@@ -1,4 +1,5 @@
-use std::fmt::Debug;
+use alloc::vec::Vec;
+use core::fmt::Debug;
 
 use glam::Vec3;
 use wide::{CmpLe, f32x8};
@@ -21,7 +22,7 @@ pub struct SpheresSoA {
 }
 
 impl Debug for SpheresSoA {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("SpheresSoA")
             .field("x", &self.x())
             .field("y", &self.y())
@@ -271,16 +272,21 @@ impl SpheresSoA {
             return false;
         }
 
-        #[cfg(target_arch = "x86_64")]
-        {
-            if is_x86_feature_detected!("avx512f") {
-                return unsafe { avx512::any_collides_sphere_avx512(self, sphere) };
+        cfg_if::cfg_if! {
+            if #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))] {
+                unsafe { avx512::any_collides_sphere_avx512(self, sphere) }
+            } else if #[cfg(all(target_arch = "x86_64", feature = "std"))] {
+                if is_x86_feature_detected!("avx512f") {
+                    return unsafe { avx512::any_collides_sphere_avx512(self, sphere) };
+                }
+                self.any_collides_sphere_f32x8(sphere)
+            } else {
+                self.any_collides_sphere_f32x8(sphere)
             }
         }
-
-        self.any_collides_sphere_f32x8(sphere)
     }
 
+    #[cfg_attr(all(target_arch = "x86_64", target_feature = "avx512f"), allow(dead_code))]
     fn any_collides_sphere_f32x8(&self, sphere: &Sphere) -> bool {
         let cx = f32x8::splat(sphere.center.x);
         let cy = f32x8::splat(sphere.center.y);
@@ -337,16 +343,21 @@ impl SpheresSoA {
             return false;
         }
 
-        #[cfg(target_arch = "x86_64")]
-        {
-            if is_x86_feature_detected!("avx512f") {
-                return unsafe { avx512::broadphase_collect_avx512(self, query, out) };
+        cfg_if::cfg_if! {
+            if #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))] {
+                unsafe { avx512::broadphase_collect_avx512(self, query, out) }
+            } else if #[cfg(all(target_arch = "x86_64", feature = "std"))] {
+                if is_x86_feature_detected!("avx512f") {
+                    return unsafe { avx512::broadphase_collect_avx512(self, query, out) };
+                }
+                self.broadphase_collect_f32x8(query, out)
+            } else {
+                self.broadphase_collect_f32x8(query, out)
             }
         }
-
-        self.broadphase_collect_f32x8(query, out)
     }
 
+    #[cfg_attr(all(target_arch = "x86_64", target_feature = "avx512f"), allow(dead_code))]
     fn broadphase_collect_f32x8(&self, query: &Sphere, out: &mut [bool]) -> bool {
         let cx = f32x8::splat(query.center.x);
         let cy = f32x8::splat(query.center.y);
@@ -395,16 +406,21 @@ impl SpheresSoA {
             return false;
         }
 
-        #[cfg(target_arch = "x86_64")]
-        {
-            if is_x86_feature_detected!("avx512f") {
-                return unsafe { avx512::any_collides_soa_avx512(self, other) };
+        cfg_if::cfg_if! {
+            if #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))] {
+                unsafe { avx512::any_collides_soa_avx512(self, other) }
+            } else if #[cfg(all(target_arch = "x86_64", feature = "std"))] {
+                if is_x86_feature_detected!("avx512f") {
+                    return unsafe { avx512::any_collides_soa_avx512(self, other) };
+                }
+                self.any_collides_soa_f32x8(other)
+            } else {
+                self.any_collides_soa_f32x8(other)
             }
         }
-
-        self.any_collides_soa_f32x8(other)
     }
 
+    #[cfg_attr(all(target_arch = "x86_64", target_feature = "avx512f"), allow(dead_code))]
     fn any_collides_soa_f32x8(&self, other: &SpheresSoA) -> bool {
         let other_chunks = other.chunk_count_8();
         let oxp = other.x().as_ptr();
@@ -457,28 +473,36 @@ impl SpheresSoA {
 impl Transformable for SpheresSoA {
     fn translate(&mut self, offset: glam::Vec3A) {
         let offset = Vec3::from(offset);
-        #[cfg(target_arch = "x86_64")]
-        {
-            if is_x86_feature_detected!("avx512f") {
+        cfg_if::cfg_if! {
+            if #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))] {
                 unsafe { avx512::translate_avx512(self, offset) };
-                return;
+            } else if #[cfg(all(target_arch = "x86_64", feature = "std"))] {
+                if is_x86_feature_detected!("avx512f") {
+                    unsafe { avx512::translate_avx512(self, offset) };
+                    return;
+                }
+                self.translate_f32x8(offset);
+            } else {
+                self.translate_f32x8(offset);
             }
         }
-
-        self.translate_f32x8(offset);
     }
 
     fn rotate_mat(&mut self, mat: glam::Mat3A) {
         let mat = glam::Mat3::from(mat);
-        #[cfg(target_arch = "x86_64")]
-        {
-            if is_x86_feature_detected!("avx512f") {
+        cfg_if::cfg_if! {
+            if #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))] {
                 unsafe { avx512::rotate_mat_avx512(self, mat) };
-                return;
+            } else if #[cfg(all(target_arch = "x86_64", feature = "std"))] {
+                if is_x86_feature_detected!("avx512f") {
+                    unsafe { avx512::rotate_mat_avx512(self, mat) };
+                    return;
+                }
+                self.rotate_mat_f32x8(mat);
+            } else {
+                self.rotate_mat_f32x8(mat);
             }
         }
-
-        self.rotate_mat_f32x8(mat);
     }
 
     fn rotate_quat(&mut self, quat: glam::Quat) {
@@ -486,19 +510,24 @@ impl Transformable for SpheresSoA {
     }
 
     fn transform(&mut self, mat: glam::Affine3A) {
-        #[cfg(target_arch = "x86_64")]
-        {
-            if is_x86_feature_detected!("avx512f") {
+        cfg_if::cfg_if! {
+            if #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))] {
                 unsafe { avx512::transform_avx512(self, mat) };
-                return;
+            } else if #[cfg(all(target_arch = "x86_64", feature = "std"))] {
+                if is_x86_feature_detected!("avx512f") {
+                    unsafe { avx512::transform_avx512(self, mat) };
+                    return;
+                }
+                self.transform_f32x8(mat);
+            } else {
+                self.transform_f32x8(mat);
             }
         }
-
-        self.transform_f32x8(mat);
     }
 }
 
 impl SpheresSoA {
+    #[cfg_attr(all(target_arch = "x86_64", target_feature = "avx512f"), allow(dead_code))]
     fn translate_f32x8(&mut self, offset: Vec3) {
         let ox = f32x8::splat(offset.x);
         let oy = f32x8::splat(offset.y);
@@ -522,6 +551,7 @@ impl SpheresSoA {
         }
     }
 
+    #[cfg_attr(all(target_arch = "x86_64", target_feature = "avx512f"), allow(dead_code))]
     fn rotate_mat_f32x8(&mut self, mat: glam::Mat3) {
         let m00 = f32x8::splat(mat.x_axis.x);
         let m01 = f32x8::splat(mat.y_axis.x);
@@ -554,6 +584,7 @@ impl SpheresSoA {
         }
     }
 
+    #[cfg_attr(all(target_arch = "x86_64", target_feature = "avx512f"), allow(dead_code))]
     fn transform_f32x8(&mut self, mat: glam::Affine3A) {
         let rot = mat.matrix3;
         let m00 = f32x8::splat(rot.x_axis.x);
@@ -594,19 +625,24 @@ impl SpheresSoA {
 impl Scalable for SpheresSoA {
     /// Scale all radii by a factor.
     fn scale(&mut self, factor: f32) {
-        #[cfg(target_arch = "x86_64")]
-        {
-            if is_x86_feature_detected!("avx512f") {
+        cfg_if::cfg_if! {
+            if #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))] {
                 unsafe { avx512::scale_avx512(self, factor) };
-                return;
+            } else if #[cfg(all(target_arch = "x86_64", feature = "std"))] {
+                if is_x86_feature_detected!("avx512f") {
+                    unsafe { avx512::scale_avx512(self, factor) };
+                    return;
+                }
+                self.scale_f32x8(factor);
+            } else {
+                self.scale_f32x8(factor);
             }
         }
-
-        self.scale_f32x8(factor);
     }
 }
 
 impl SpheresSoA {
+    #[cfg_attr(all(target_arch = "x86_64", target_feature = "avx512f"), allow(dead_code))]
     fn scale_f32x8(&mut self, factor: f32) {
         let f = f32x8::splat(factor);
         let chunks = self.chunk_count_8();
@@ -624,13 +660,16 @@ impl SpheresSoA {
 // ---------------------------------------------------------------------------
 // AVX-512 implementations (16 floats per register)
 // ---------------------------------------------------------------------------
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(
+    target_arch = "x86_64",
+    any(feature = "std", target_feature = "avx512f")
+))]
 #[allow(unsafe_op_in_unsafe_fn)]
 mod avx512 {
     use super::SpheresSoA;
     use crate::Sphere;
     use glam::Vec3;
-    use std::arch::x86_64::*;
+    use core::arch::x86_64::*;
 
     #[inline]
     fn chunk_count_16(soa: &SpheresSoA) -> usize {
@@ -951,12 +990,12 @@ where
     }
 
     #[inline]
-    pub fn iter(&self) -> std::slice::Iter<'_, T> {
+    pub fn iter(&self) -> core::slice::Iter<'_, T> {
         self.items.iter()
     }
 
     #[inline]
-    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, T> {
+    pub fn iter_mut(&mut self) -> core::slice::IterMut<'_, T> {
         self.items.iter_mut()
     }
 }
@@ -966,7 +1005,7 @@ where
     T: Bounded + Transformable + Scalable + Debug + Clone + Sized,
 {
     type Item = &'a T;
-    type IntoIter = std::slice::Iter<'a, T>;
+    type IntoIter = core::slice::Iter<'a, T>;
     fn into_iter(self) -> Self::IntoIter {
         self.items.iter()
     }
@@ -977,7 +1016,7 @@ where
     T: Bounded + Transformable + Scalable + Debug + Clone + Sized,
 {
     type Item = &'a mut T;
-    type IntoIter = std::slice::IterMut<'a, T>;
+    type IntoIter = core::slice::IterMut<'a, T>;
     fn into_iter(self) -> Self::IntoIter {
         self.items.iter_mut()
     }
@@ -1078,6 +1117,8 @@ where
 pub(crate) mod batch {
     use glam::Vec3;
     use wide::{CmpLe, f32x8};
+    #[cfg(not(feature = "std"))]
+    use crate::F32Ext;
 
     use super::SpheresSoA;
     use crate::Collides;

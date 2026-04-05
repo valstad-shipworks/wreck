@@ -1,4 +1,7 @@
-use std::fmt;
+use alloc::vec::Vec;
+use core::fmt;
+#[cfg(not(feature = "std"))]
+use crate::F32Ext;
 
 use glam::{DMat3, DVec3, Vec3};
 use wide::{CmpLe, f32x8};

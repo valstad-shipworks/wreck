@@ -1,3 +1,10 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+#[cfg(not(any(feature = "std", feature = "libm")))]
+compile_error!("at least one of the `std` or `libm` features must be enabled");
+#[macro_use]
+extern crate alloc;
+use alloc::vec::Vec;
+
 pub(crate) mod capsule;
 pub(crate) mod cuboid;
 pub(crate) mod cylinder;

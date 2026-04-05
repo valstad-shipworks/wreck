@@ -1,4 +1,7 @@
-use std::fmt;
+use alloc::vec::Vec;
+use core::fmt;
+#[cfg(not(feature = "std"))]
+use crate::F32Ext;
 
 use glam::{DMat3, DVec3, Vec3};
 use wide::{CmpLe, f32x8};
@@ -591,7 +594,7 @@ impl Collides<Cylinder> for Cylinder {
 
         // Check end caps: sample 5 points on each cylinder against the other
         for cyl_a in [self, other] {
-            let cyl_b = if std::ptr::eq(cyl_a, self) {
+            let cyl_b = if core::ptr::eq(cyl_a, self) {
                 other
             } else {
                 self

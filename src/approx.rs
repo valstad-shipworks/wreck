@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use core::fmt::Debug;
 
 use crate::capsule::Capsule;
 use crate::convex_polytope::heap::ConvexPolytope;

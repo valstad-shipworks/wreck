@@ -70,7 +70,6 @@
 //! This work is licensed to you under the Apache 2.0 license.
 #![warn(clippy::pedantic, clippy::cargo, clippy::nursery, missing_docs)]
 
-extern crate alloc;
 use aligned_vec::{ABox, AVec, RuntimeAlign};
 use alloc::{boxed::Box, vec, vec::Vec};
 

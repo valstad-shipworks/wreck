@@ -1,4 +1,6 @@
-use std::fmt;
+use core::fmt;
+#[cfg(not(feature = "std"))]
+use crate::F32Ext;
 
 use glam::Vec3;
 

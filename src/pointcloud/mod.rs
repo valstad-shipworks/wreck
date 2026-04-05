@@ -1,7 +1,8 @@
 mod capt;
 mod no_pcl;
 
-use std::fmt::Debug;
+use alloc::vec::Vec;
+use core::fmt::Debug;
 
 use glam::Vec3;
 use inherent::inherent;
@@ -648,9 +649,9 @@ impl Collides<ConvexPolygon> for Pointcloud {
         let polygon = if let Some(inv) = &self.inverse_transform {
             let mut p = polygon.clone();
             p.transform(*inv);
-            std::borrow::Cow::Owned(p)
+            alloc::borrow::Cow::Owned(p)
         } else {
-            std::borrow::Cow::Borrowed(polygon)
+            alloc::borrow::Cow::Borrowed(polygon)
         };
 
         let r_sq = self.point_radius * self.point_radius;

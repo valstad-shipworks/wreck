@@ -2,6 +2,10 @@ pub(crate) mod array;
 pub(crate) mod heap;
 pub(crate) mod refer;
 
+use alloc::vec::Vec;
+#[cfg(not(feature = "std"))]
+use crate::F32Ext;
+
 use glam::Vec3;
 use wide::f32x8;
 
@@ -272,16 +276,35 @@ impl From<Sphere> for ConvexPolytope {
         let mut vertices = Vec::new();
         let mut normals_set: Vec<Vec3> = Vec::new();
 
-        // Collect unique vertices via edge midpoint subdivision
-        let mut vert_map = std::collections::HashMap::new();
-        let mut get_or_insert = |v: Vec3, verts: &mut Vec<Vec3>| -> usize {
-            // Quantize to avoid floating point duplicates
+        #[cfg(feature = "std")]
+        let mut get_or_insert = {
+            let mut vert_map = std::collections::HashMap::new();
+            move |v: Vec3, verts: &mut Vec<Vec3>| -> usize {
+                let key = ((v.x * 1e5) as i32, (v.y * 1e5) as i32, (v.z * 1e5) as i32);
+                *vert_map.entry(key).or_insert_with(|| {
+                    let idx = verts.len();
+                    verts.push(v);
+                    idx
+                })
+            }
+        };
+
+        #[cfg(not(feature = "std"))]
+        let get_or_insert = |v: Vec3, verts: &mut Vec<Vec3>| -> usize {
             let key = ((v.x * 1e5) as i32, (v.y * 1e5) as i32, (v.z * 1e5) as i32);
-            *vert_map.entry(key).or_insert_with(|| {
-                let idx = verts.len();
-                verts.push(v);
-                idx
-            })
+            for (i, existing) in verts.iter().enumerate() {
+                let ek = (
+                    (existing.x * 1e5) as i32,
+                    (existing.y * 1e5) as i32,
+                    (existing.z * 1e5) as i32,
+                );
+                if ek == key {
+                    return i;
+                }
+            }
+            let idx = verts.len();
+            verts.push(v);
+            idx
         };
 
         let mut sub_faces: Vec<[usize; 3]> = Vec::new();
@@ -424,12 +447,12 @@ impl From<Capsule> for ConvexPolytope {
         // Hemisphere vertices at p1 (backward hemisphere)
         vertices.push(p1 - ax_fwd * r); // pole
         for i in 0..n_ring {
-            let angle = std::f32::consts::TAU * i as f32 / n_ring as f32;
+            let angle = core::f32::consts::TAU * i as f32 / n_ring as f32;
             let (sin_a, cos_a) = angle.sin_cos();
             // Equator
             vertices.push(p1 + (ax_u * cos_a + ax_v * sin_a) * r);
             // 45-degree ring toward back pole
-            let lat = std::f32::consts::FRAC_PI_4;
+            let lat = core::f32::consts::FRAC_PI_4;
             vertices.push(
                 p1 - ax_fwd * (r * lat.sin()) + (ax_u * cos_a + ax_v * sin_a) * (r * lat.cos()),
             );
@@ -438,12 +461,12 @@ impl From<Capsule> for ConvexPolytope {
         // Hemisphere vertices at p2 (forward hemisphere)
         vertices.push(p2 + ax_fwd * r); // pole
         for i in 0..n_ring {
-            let angle = std::f32::consts::TAU * i as f32 / n_ring as f32;
+            let angle = core::f32::consts::TAU * i as f32 / n_ring as f32;
             let (sin_a, cos_a) = angle.sin_cos();
             // Equator
             vertices.push(p2 + (ax_u * cos_a + ax_v * sin_a) * r);
             // 45-degree ring toward front pole
-            let lat = std::f32::consts::FRAC_PI_4;
+            let lat = core::f32::consts::FRAC_PI_4;
             vertices.push(
                 p2 + ax_fwd * (r * lat.sin()) + (ax_u * cos_a + ax_v * sin_a) * (r * lat.cos()),
             );
@@ -458,7 +481,7 @@ impl From<Capsule> for ConvexPolytope {
 
         // Side planes from ring directions
         for i in 0..n_ring {
-            let angle = std::f32::consts::TAU * i as f32 / n_ring as f32;
+            let angle = core::f32::consts::TAU * i as f32 / n_ring as f32;
             let (sin_a, cos_a) = angle.sin_cos();
             let radial = (ax_u * cos_a + ax_v * sin_a).normalize();
             let d = max_projection(&vertices, radial);

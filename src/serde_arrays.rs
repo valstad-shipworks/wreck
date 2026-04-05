@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use serde::de::{Deserialize, Deserializer, SeqAccess, Visitor};
 use serde::ser::{Serialize, SerializeSeq, Serializer};
 

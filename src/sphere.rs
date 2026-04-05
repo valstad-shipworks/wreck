@@ -1,4 +1,4 @@
-use std::fmt;
+use core::fmt;
 
 use glam::{DVec3, Vec3};
 

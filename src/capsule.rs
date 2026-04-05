@@ -1,4 +1,5 @@
-use std::fmt;
+use alloc::vec::Vec;
+use core::fmt;
 
 use glam::{DMat3, DVec3, Vec3};
 
