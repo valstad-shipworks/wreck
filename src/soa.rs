@@ -1120,7 +1120,7 @@ pub(crate) mod batch {
     #[cfg(not(feature = "std"))]
     use crate::F32Ext;
 
-    use super::SpheresSoA;
+    use super::{BroadCollection, SpheresSoA};
     use crate::Collides;
     use crate::capsule::Capsule;
     use crate::cuboid::Cuboid;
@@ -1128,317 +1128,6 @@ pub(crate) mod batch {
     use crate::line::{Line, LineSegment, Ray};
     use crate::plane::Plane;
     use crate::sphere::Sphere;
-
-    // ── Sphere vs Capsule ────────────────────────────────────────────────
-
-    pub fn sphere_vs_capsules(sphere: &Sphere, others: &[Capsule]) -> bool {
-        let cx = f32x8::splat(sphere.center.x);
-        let cy = f32x8::splat(sphere.center.y);
-        let cz = f32x8::splat(sphere.center.z);
-        let sr = f32x8::splat(sphere.radius);
-        let zero = f32x8::splat(0.0);
-        let one = f32x8::splat(1.0);
-
-        let chunks = others.chunks_exact(8);
-        let remainder = chunks.remainder();
-
-        for chunk in chunks {
-            let mut p1x = [0.0f32; 8];
-            let mut p1y = [0.0f32; 8];
-            let mut p1z = [0.0f32; 8];
-            let mut dx = [0.0f32; 8];
-            let mut dy = [0.0f32; 8];
-            let mut dz = [0.0f32; 8];
-            let mut rdv = [0.0f32; 8];
-            let mut cr = [0.0f32; 8];
-            for (i, c) in chunk.iter().enumerate() {
-                p1x[i] = c.p1.x;
-                p1y[i] = c.p1.y;
-                p1z[i] = c.p1.z;
-                dx[i] = c.dir.x;
-                dy[i] = c.dir.y;
-                dz[i] = c.dir.z;
-                rdv[i] = c.rdv;
-                cr[i] = c.radius;
-            }
-            let p1x = f32x8::new(p1x);
-            let p1y = f32x8::new(p1y);
-            let p1z = f32x8::new(p1z);
-            let dx = f32x8::new(dx);
-            let dy = f32x8::new(dy);
-            let dz = f32x8::new(dz);
-            let rdv = f32x8::new(rdv);
-            let cr = f32x8::new(cr);
-
-            let dfx = cx - p1x;
-            let dfy = cy - p1y;
-            let dfz = cz - p1z;
-            let t = ((dfx * dx + dfy * dy + dfz * dz) * rdv).max(zero).min(one);
-
-            let clx = p1x + dx * t;
-            let cly = p1y + dy * t;
-            let clz = p1z + dz * t;
-
-            let ex = cx - clx;
-            let ey = cy - cly;
-            let ez = cz - clz;
-            let dist_sq = ex * ex + ey * ey + ez * ez;
-
-            let rs = sr + cr;
-            if dist_sq.simd_le(rs * rs).any() {
-                return true;
-            }
-        }
-
-        remainder.iter().any(|c| sphere.collides(c))
-    }
-
-    // ── Sphere vs Cuboid ─────────────────────────────────────────────────
-
-    pub fn sphere_vs_cuboids(sphere: &Sphere, others: &[Cuboid]) -> bool {
-        let cx = f32x8::splat(sphere.center.x);
-        let cy = f32x8::splat(sphere.center.y);
-        let cz = f32x8::splat(sphere.center.z);
-        let r_sq = f32x8::splat(sphere.radius * sphere.radius);
-        let zero = f32x8::splat(0.0);
-
-        let chunks = others.chunks_exact(8);
-        let remainder = chunks.remainder();
-
-        for chunk in chunks {
-            let mut ocx = [0.0f32; 8];
-            let mut ocy = [0.0f32; 8];
-            let mut ocz = [0.0f32; 8];
-            for (i, c) in chunk.iter().enumerate() {
-                ocx[i] = c.center.x;
-                ocy[i] = c.center.y;
-                ocz[i] = c.center.z;
-            }
-            let dfx = cx - f32x8::new(ocx);
-            let dfy = cy - f32x8::new(ocy);
-            let dfz = cz - f32x8::new(ocz);
-
-            let mut dist_sq = zero;
-            for axis_idx in 0..3 {
-                let mut ax = [0.0f32; 8];
-                let mut ay = [0.0f32; 8];
-                let mut az = [0.0f32; 8];
-                let mut he = [0.0f32; 8];
-                for (i, c) in chunk.iter().enumerate() {
-                    ax[i] = c.axes[axis_idx].x;
-                    ay[i] = c.axes[axis_idx].y;
-                    az[i] = c.axes[axis_idx].z;
-                    he[i] = c.half_extents[axis_idx];
-                }
-                let proj = dfx * f32x8::new(ax) + dfy * f32x8::new(ay) + dfz * f32x8::new(az);
-                let abs_proj = proj.max(-proj);
-                let excess = (abs_proj - f32x8::new(he)).max(zero);
-                dist_sq = dist_sq + excess * excess;
-            }
-
-            if dist_sq.simd_le(r_sq).any() {
-                return true;
-            }
-        }
-
-        remainder.iter().any(|c| sphere.collides(c))
-    }
-
-    // ── Plane vs Capsule ─────────────────────────────────────────────────
-
-    pub fn plane_vs_capsules(plane: &Plane, others: &[Capsule]) -> bool {
-        let nx = f32x8::splat(plane.normal.x);
-        let ny = f32x8::splat(plane.normal.y);
-        let nz = f32x8::splat(plane.normal.z);
-        let d = f32x8::splat(plane.d);
-        let zero = f32x8::ZERO;
-
-        let chunks = others.chunks_exact(8);
-        let remainder = chunks.remainder();
-
-        for chunk in chunks {
-            let mut p1x = [0.0f32; 8];
-            let mut p1y = [0.0f32; 8];
-            let mut p1z = [0.0f32; 8];
-            let mut p2x = [0.0f32; 8];
-            let mut p2y = [0.0f32; 8];
-            let mut p2z = [0.0f32; 8];
-            let mut cr = [0.0f32; 8];
-            for (i, c) in chunk.iter().enumerate() {
-                let p2 = c.p2();
-                p1x[i] = c.p1.x;
-                p1y[i] = c.p1.y;
-                p1z[i] = c.p1.z;
-                p2x[i] = p2.x;
-                p2y[i] = p2.y;
-                p2z[i] = p2.z;
-                cr[i] = c.radius;
-            }
-            let proj1 = nx * f32x8::new(p1x) + ny * f32x8::new(p1y) + nz * f32x8::new(p1z);
-            let proj2 = nx * f32x8::new(p2x) + ny * f32x8::new(p2y) + nz * f32x8::new(p2z);
-            let min_proj = proj1.min(proj2);
-            let sep = min_proj - d - f32x8::new(cr);
-            if sep.simd_le(zero).any() {
-                return true;
-            }
-        }
-
-        remainder.iter().any(|c| plane.collides(c))
-    }
-
-    // ── Plane vs Cuboid ──────────────────────────────────────────────────
-
-    pub fn plane_vs_cuboids(plane: &Plane, others: &[Cuboid]) -> bool {
-        let nx = f32x8::splat(plane.normal.x);
-        let ny = f32x8::splat(plane.normal.y);
-        let nz = f32x8::splat(plane.normal.z);
-        let d = f32x8::splat(plane.d);
-        let zero = f32x8::ZERO;
-
-        let chunks = others.chunks_exact(8);
-        let remainder = chunks.remainder();
-
-        for chunk in chunks {
-            let mut ccx = [0.0f32; 8];
-            let mut ccy = [0.0f32; 8];
-            let mut ccz = [0.0f32; 8];
-            let mut ext = [0.0f32; 8];
-            for (i, c) in chunk.iter().enumerate() {
-                ccx[i] = c.center.x;
-                ccy[i] = c.center.y;
-                ccz[i] = c.center.z;
-                ext[i] = plane.normal.dot(c.axes[0]).abs() * c.half_extents[0]
-                    + plane.normal.dot(c.axes[1]).abs() * c.half_extents[1]
-                    + plane.normal.dot(c.axes[2]).abs() * c.half_extents[2];
-            }
-            let center_proj = nx * f32x8::new(ccx) + ny * f32x8::new(ccy) + nz * f32x8::new(ccz);
-            let sep = center_proj - f32x8::new(ext) - d;
-            if sep.simd_le(zero).any() {
-                return true;
-            }
-        }
-
-        remainder.iter().any(|c| plane.collides(c))
-    }
-
-    // ── Sphere vs Cylinder ────────────────────────────────────────────────
-
-    pub fn sphere_vs_cylinders(sphere: &Sphere, others: &[Cylinder]) -> bool {
-        let cx = f32x8::splat(sphere.center.x);
-        let cy = f32x8::splat(sphere.center.y);
-        let cz = f32x8::splat(sphere.center.z);
-        let sr_sq = f32x8::splat(sphere.radius * sphere.radius);
-        let sr = f32x8::splat(sphere.radius);
-        let zero = f32x8::splat(0.0);
-        let one = f32x8::splat(1.0);
-        let four = f32x8::splat(4.0);
-
-        let chunks = others.chunks_exact(8);
-        let remainder = chunks.remainder();
-
-        for chunk in chunks {
-            let mut p1x = [0.0f32; 8];
-            let mut p1y = [0.0f32; 8];
-            let mut p1z = [0.0f32; 8];
-            let mut dx = [0.0f32; 8];
-            let mut dy = [0.0f32; 8];
-            let mut dz = [0.0f32; 8];
-            let mut rdv = [0.0f32; 8];
-            let mut cr = [0.0f32; 8];
-            let mut dir_sq = [0.0f32; 8];
-            for (i, c) in chunk.iter().enumerate() {
-                p1x[i] = c.p1.x;
-                p1y[i] = c.p1.y;
-                p1z[i] = c.p1.z;
-                dx[i] = c.dir.x;
-                dy[i] = c.dir.y;
-                dz[i] = c.dir.z;
-                rdv[i] = c.rdv;
-                cr[i] = c.radius;
-                dir_sq[i] = c.dir.dot(c.dir);
-            }
-            let p1x = f32x8::new(p1x);
-            let p1y = f32x8::new(p1y);
-            let p1z = f32x8::new(p1z);
-            let dx = f32x8::new(dx);
-            let dy = f32x8::new(dy);
-            let dz = f32x8::new(dz);
-            let rdv = f32x8::new(rdv);
-            let cr = f32x8::new(cr);
-            let dir_sq = f32x8::new(dir_sq);
-
-            let wx = cx - p1x;
-            let wy = cy - p1y;
-            let wz = cz - p1z;
-
-            let t = (wx * dx + wy * dy + wz * dz) * rdv;
-            let t_c = t.max(zero).min(one);
-
-            // Perpendicular distance (using unclamped t)
-            let perpx = wx - dx * t;
-            let perpy = wy - dy * t;
-            let perpz = wz - dz * t;
-            let r_sq = perpx * perpx + perpy * perpy + perpz * perpz;
-
-            // Barrel: t in [0,1], r_sq <= (cyl_r + sphere_r)^2
-            let in_barrel = zero.simd_le(t) & t.simd_le(one);
-            let combined = cr + sr;
-            let barrel_hit = in_barrel & r_sq.simd_le(combined * combined);
-
-            // End cap: axial and radial distance
-            let t_excess = t - t_c;
-            let d_axial_sq = t_excess * t_excess * dir_sq;
-            let cr_sq = cr * cr;
-
-            // End cap, radially inside
-            let inside_r = r_sq.simd_le(cr_sq);
-            let endcap_inside = inside_r & d_axial_sq.simd_le(sr_sq);
-
-            // End cap, radially outside: sqrt-free
-            let l = r_sq + cr_sq + d_axial_sq - sr_sq;
-            let endcap_outside = l.simd_le(zero) | (l * l).simd_le(four * cr_sq * r_sq);
-
-            let not_barrel = !in_barrel;
-            let hit = barrel_hit | (not_barrel & (endcap_inside | endcap_outside));
-            if hit.any() {
-                return true;
-            }
-        }
-
-        remainder.iter().any(|c| sphere.collides(c))
-    }
-
-    // ── Plane vs Cylinder ───────────────────────────────────────────────
-
-    pub fn plane_vs_cylinders(plane: &Plane, others: &[Cylinder]) -> bool {
-        let chunks = others.chunks_exact(8);
-        let remainder = chunks.remainder();
-        let zero = f32x8::ZERO;
-
-        for chunk in chunks {
-            let mut sep_arr = [0.0f32; 8];
-            for (i, c) in chunk.iter().enumerate() {
-                let proj1 = plane.normal.dot(c.p1);
-                let proj2 = plane.normal.dot(c.p1 + c.dir);
-                let min_proj = proj1.min(proj2);
-
-                let dir_sq = c.dir.dot(c.dir);
-                let n_dot_dir = plane.normal.dot(c.dir);
-                let n_perp_sq = if dir_sq > f32::EPSILON {
-                    (1.0 - n_dot_dir * n_dot_dir / dir_sq).max(0.0)
-                } else {
-                    1.0
-                };
-                let disc_extent = c.radius * n_perp_sq.sqrt();
-                sep_arr[i] = min_proj - disc_extent - plane.d;
-            }
-            if f32x8::new(sep_arr).simd_le(zero).any() {
-                return true;
-            }
-        }
-
-        remainder.iter().any(|c| plane.collides(c))
-    }
 
     pub fn plane_vs_spheres_soa(plane: &Plane, soa: &SpheresSoA) -> bool {
         let nx = f32x8::splat(plane.normal.x);
@@ -1543,5 +1232,421 @@ pub(crate) mod batch {
     #[inline]
     pub fn segment_vs_spheres_soa(seg: &LineSegment, soa: &SpheresSoA) -> bool {
         line_vs_spheres_soa_inner(seg.p1, seg.dir, seg.rdv, 0.0, 1.0, soa)
+    }
+
+    // ── Broadphase-filtered batch functions (Collider paths) ─────────────
+    //
+    // These read per-chunk bounding spheres from the BroadCollection's
+    // SpheresSoA and skip chunks where no bounding sphere overlaps the query.
+
+    #[inline]
+    fn broad_sphere_overlaps_chunk(
+        cx: f32x8, cy: f32x8, cz: f32x8, sr: f32x8,
+        bxp: *const f32, byp: *const f32, bzp: *const f32, brp: *const f32,
+        base: usize,
+    ) -> bool {
+        let (bx, by, bz, br);
+        unsafe {
+            bx = f32x8::new(*bxp.add(base).cast::<[f32; 8]>());
+            by = f32x8::new(*byp.add(base).cast::<[f32; 8]>());
+            bz = f32x8::new(*bzp.add(base).cast::<[f32; 8]>());
+            br = f32x8::new(*brp.add(base).cast::<[f32; 8]>());
+        }
+        let dx = cx - bx;
+        let dy = cy - by;
+        let dz = cz - bz;
+        let dist_sq = dx * dx + dy * dy + dz * dz;
+        let max_r = sr + br;
+        dist_sq.simd_le(max_r * max_r).any()
+    }
+
+    #[inline]
+    fn broad_plane_overlaps_chunk(
+        nx: f32x8, ny: f32x8, nz: f32x8, d: f32x8,
+        bxp: *const f32, byp: *const f32, bzp: *const f32, brp: *const f32,
+        base: usize,
+    ) -> bool {
+        let (bx, by, bz, br);
+        unsafe {
+            bx = f32x8::new(*bxp.add(base).cast::<[f32; 8]>());
+            by = f32x8::new(*byp.add(base).cast::<[f32; 8]>());
+            bz = f32x8::new(*bzp.add(base).cast::<[f32; 8]>());
+            br = f32x8::new(*brp.add(base).cast::<[f32; 8]>());
+        }
+        let proj = nx * bx + ny * by + nz * bz;
+        let sep = proj - d - br;
+        sep.simd_le(f32x8::ZERO).any()
+    }
+
+    pub fn sphere_vs_capsules_broad(sphere: &Sphere, col: &BroadCollection<Capsule>) -> bool {
+        let items = col.items();
+        let broad = &col.broad;
+        let bxp = broad.x().as_ptr();
+        let byp = broad.y().as_ptr();
+        let bzp = broad.z().as_ptr();
+        let brp = broad.r().as_ptr();
+
+        let cx = f32x8::splat(sphere.center.x);
+        let cy = f32x8::splat(sphere.center.y);
+        let cz = f32x8::splat(sphere.center.z);
+        let sr = f32x8::splat(sphere.radius);
+        let zero = f32x8::splat(0.0);
+        let one = f32x8::splat(1.0);
+
+        let chunks = items.chunks_exact(8);
+        let remainder = chunks.remainder();
+
+        for (chunk_idx, chunk) in chunks.enumerate() {
+            let base = chunk_idx * 8;
+            if !broad_sphere_overlaps_chunk(cx, cy, cz, sr, bxp, byp, bzp, brp, base) {
+                continue;
+            }
+
+            let mut p1x = [0.0f32; 8];
+            let mut p1y = [0.0f32; 8];
+            let mut p1z = [0.0f32; 8];
+            let mut dx = [0.0f32; 8];
+            let mut dy = [0.0f32; 8];
+            let mut dz = [0.0f32; 8];
+            let mut rdv = [0.0f32; 8];
+            let mut cr = [0.0f32; 8];
+            for (i, c) in chunk.iter().enumerate() {
+                p1x[i] = c.p1.x;
+                p1y[i] = c.p1.y;
+                p1z[i] = c.p1.z;
+                dx[i] = c.dir.x;
+                dy[i] = c.dir.y;
+                dz[i] = c.dir.z;
+                rdv[i] = c.rdv;
+                cr[i] = c.radius;
+            }
+            let p1x = f32x8::new(p1x);
+            let p1y = f32x8::new(p1y);
+            let p1z = f32x8::new(p1z);
+            let dx = f32x8::new(dx);
+            let dy = f32x8::new(dy);
+            let dz = f32x8::new(dz);
+            let rdv = f32x8::new(rdv);
+            let cr = f32x8::new(cr);
+
+            let dfx = cx - p1x;
+            let dfy = cy - p1y;
+            let dfz = cz - p1z;
+            let t = ((dfx * dx + dfy * dy + dfz * dz) * rdv).max(zero).min(one);
+
+            let clx = p1x + dx * t;
+            let cly = p1y + dy * t;
+            let clz = p1z + dz * t;
+
+            let ex = cx - clx;
+            let ey = cy - cly;
+            let ez = cz - clz;
+            let dist_sq = ex * ex + ey * ey + ez * ez;
+
+            let rs = sr + cr;
+            if dist_sq.simd_le(rs * rs).any() {
+                return true;
+            }
+        }
+
+        remainder.iter().any(|c| sphere.collides(c))
+    }
+
+    pub fn sphere_vs_cuboids_broad(sphere: &Sphere, col: &BroadCollection<Cuboid>) -> bool {
+        let items = col.items();
+        let broad = &col.broad;
+        let bxp = broad.x().as_ptr();
+        let byp = broad.y().as_ptr();
+        let bzp = broad.z().as_ptr();
+        let brp = broad.r().as_ptr();
+
+        let cx = f32x8::splat(sphere.center.x);
+        let cy = f32x8::splat(sphere.center.y);
+        let cz = f32x8::splat(sphere.center.z);
+        let r_sq = f32x8::splat(sphere.radius * sphere.radius);
+        let sr = f32x8::splat(sphere.radius);
+        let zero = f32x8::splat(0.0);
+
+        let chunks = items.chunks_exact(8);
+        let remainder = chunks.remainder();
+
+        for (chunk_idx, chunk) in chunks.enumerate() {
+            let base = chunk_idx * 8;
+            if !broad_sphere_overlaps_chunk(cx, cy, cz, sr, bxp, byp, bzp, brp, base) {
+                continue;
+            }
+
+            let mut ocx = [0.0f32; 8];
+            let mut ocy = [0.0f32; 8];
+            let mut ocz = [0.0f32; 8];
+            for (i, c) in chunk.iter().enumerate() {
+                ocx[i] = c.center.x;
+                ocy[i] = c.center.y;
+                ocz[i] = c.center.z;
+            }
+            let dfx = cx - f32x8::new(ocx);
+            let dfy = cy - f32x8::new(ocy);
+            let dfz = cz - f32x8::new(ocz);
+
+            let mut dist_sq = zero;
+            for axis_idx in 0..3 {
+                let mut ax = [0.0f32; 8];
+                let mut ay = [0.0f32; 8];
+                let mut az = [0.0f32; 8];
+                let mut he = [0.0f32; 8];
+                for (i, c) in chunk.iter().enumerate() {
+                    ax[i] = c.axes[axis_idx].x;
+                    ay[i] = c.axes[axis_idx].y;
+                    az[i] = c.axes[axis_idx].z;
+                    he[i] = c.half_extents[axis_idx];
+                }
+                let proj = dfx * f32x8::new(ax) + dfy * f32x8::new(ay) + dfz * f32x8::new(az);
+                let abs_proj = proj.max(-proj);
+                let excess = (abs_proj - f32x8::new(he)).max(zero);
+                dist_sq = dist_sq + excess * excess;
+            }
+
+            if dist_sq.simd_le(r_sq).any() {
+                return true;
+            }
+        }
+
+        remainder.iter().any(|c| sphere.collides(c))
+    }
+
+    pub fn sphere_vs_cylinders_broad(sphere: &Sphere, col: &BroadCollection<Cylinder>) -> bool {
+        let items = col.items();
+        let broad = &col.broad;
+        let bxp = broad.x().as_ptr();
+        let byp = broad.y().as_ptr();
+        let bzp = broad.z().as_ptr();
+        let brp = broad.r().as_ptr();
+
+        let cx = f32x8::splat(sphere.center.x);
+        let cy = f32x8::splat(sphere.center.y);
+        let cz = f32x8::splat(sphere.center.z);
+        let sr_sq = f32x8::splat(sphere.radius * sphere.radius);
+        let sr = f32x8::splat(sphere.radius);
+        let zero = f32x8::splat(0.0);
+        let one = f32x8::splat(1.0);
+        let four = f32x8::splat(4.0);
+
+        let chunks = items.chunks_exact(8);
+        let remainder = chunks.remainder();
+
+        for (chunk_idx, chunk) in chunks.enumerate() {
+            let base = chunk_idx * 8;
+            if !broad_sphere_overlaps_chunk(cx, cy, cz, sr, bxp, byp, bzp, brp, base) {
+                continue;
+            }
+
+            let mut p1x = [0.0f32; 8];
+            let mut p1y = [0.0f32; 8];
+            let mut p1z = [0.0f32; 8];
+            let mut dx = [0.0f32; 8];
+            let mut dy = [0.0f32; 8];
+            let mut dz = [0.0f32; 8];
+            let mut rdv = [0.0f32; 8];
+            let mut cr = [0.0f32; 8];
+            let mut dir_sq = [0.0f32; 8];
+            for (i, c) in chunk.iter().enumerate() {
+                p1x[i] = c.p1.x;
+                p1y[i] = c.p1.y;
+                p1z[i] = c.p1.z;
+                dx[i] = c.dir.x;
+                dy[i] = c.dir.y;
+                dz[i] = c.dir.z;
+                rdv[i] = c.rdv;
+                cr[i] = c.radius;
+                dir_sq[i] = c.dir.dot(c.dir);
+            }
+            let p1x = f32x8::new(p1x);
+            let p1y = f32x8::new(p1y);
+            let p1z = f32x8::new(p1z);
+            let dx = f32x8::new(dx);
+            let dy = f32x8::new(dy);
+            let dz = f32x8::new(dz);
+            let rdv = f32x8::new(rdv);
+            let cr = f32x8::new(cr);
+            let dir_sq = f32x8::new(dir_sq);
+
+            let wx = cx - p1x;
+            let wy = cy - p1y;
+            let wz = cz - p1z;
+
+            let t = (wx * dx + wy * dy + wz * dz) * rdv;
+            let t_c = t.max(zero).min(one);
+
+            let perpx = wx - dx * t;
+            let perpy = wy - dy * t;
+            let perpz = wz - dz * t;
+            let r_sq = perpx * perpx + perpy * perpy + perpz * perpz;
+
+            let in_barrel = zero.simd_le(t) & t.simd_le(one);
+            let combined = cr + sr;
+            let barrel_hit = in_barrel & r_sq.simd_le(combined * combined);
+
+            let t_excess = t - t_c;
+            let d_axial_sq = t_excess * t_excess * dir_sq;
+            let cr_sq = cr * cr;
+
+            let inside_r = r_sq.simd_le(cr_sq);
+            let endcap_inside = inside_r & d_axial_sq.simd_le(sr_sq);
+
+            let l = r_sq + cr_sq + d_axial_sq - sr_sq;
+            let endcap_outside = l.simd_le(zero) | (l * l).simd_le(four * cr_sq * r_sq);
+
+            let not_barrel = !in_barrel;
+            let hit = barrel_hit | (not_barrel & (endcap_inside | endcap_outside));
+            if hit.any() {
+                return true;
+            }
+        }
+
+        remainder.iter().any(|c| sphere.collides(c))
+    }
+
+    pub fn plane_vs_capsules_broad(plane: &Plane, col: &BroadCollection<Capsule>) -> bool {
+        let items = col.items();
+        let broad = &col.broad;
+        let bxp = broad.x().as_ptr();
+        let byp = broad.y().as_ptr();
+        let bzp = broad.z().as_ptr();
+        let brp = broad.r().as_ptr();
+
+        let nx = f32x8::splat(plane.normal.x);
+        let ny = f32x8::splat(plane.normal.y);
+        let nz = f32x8::splat(plane.normal.z);
+        let d = f32x8::splat(plane.d);
+        let zero = f32x8::ZERO;
+
+        let chunks = items.chunks_exact(8);
+        let remainder = chunks.remainder();
+
+        for (chunk_idx, chunk) in chunks.enumerate() {
+            let base = chunk_idx * 8;
+            if !broad_plane_overlaps_chunk(nx, ny, nz, d, bxp, byp, bzp, brp, base) {
+                continue;
+            }
+
+            let mut p1x = [0.0f32; 8];
+            let mut p1y = [0.0f32; 8];
+            let mut p1z = [0.0f32; 8];
+            let mut p2x = [0.0f32; 8];
+            let mut p2y = [0.0f32; 8];
+            let mut p2z = [0.0f32; 8];
+            let mut cr = [0.0f32; 8];
+            for (i, c) in chunk.iter().enumerate() {
+                let p2 = c.p2();
+                p1x[i] = c.p1.x;
+                p1y[i] = c.p1.y;
+                p1z[i] = c.p1.z;
+                p2x[i] = p2.x;
+                p2y[i] = p2.y;
+                p2z[i] = p2.z;
+                cr[i] = c.radius;
+            }
+            let proj1 = nx * f32x8::new(p1x) + ny * f32x8::new(p1y) + nz * f32x8::new(p1z);
+            let proj2 = nx * f32x8::new(p2x) + ny * f32x8::new(p2y) + nz * f32x8::new(p2z);
+            let min_proj = proj1.min(proj2);
+            let sep = min_proj - d - f32x8::new(cr);
+            if sep.simd_le(zero).any() {
+                return true;
+            }
+        }
+
+        remainder.iter().any(|c| plane.collides(c))
+    }
+
+    pub fn plane_vs_cuboids_broad(plane: &Plane, col: &BroadCollection<Cuboid>) -> bool {
+        let items = col.items();
+        let broad = &col.broad;
+        let bxp = broad.x().as_ptr();
+        let byp = broad.y().as_ptr();
+        let bzp = broad.z().as_ptr();
+        let brp = broad.r().as_ptr();
+
+        let nx = f32x8::splat(plane.normal.x);
+        let ny = f32x8::splat(plane.normal.y);
+        let nz = f32x8::splat(plane.normal.z);
+        let d = f32x8::splat(plane.d);
+        let zero = f32x8::ZERO;
+
+        let chunks = items.chunks_exact(8);
+        let remainder = chunks.remainder();
+
+        for (chunk_idx, chunk) in chunks.enumerate() {
+            let base = chunk_idx * 8;
+            if !broad_plane_overlaps_chunk(nx, ny, nz, d, bxp, byp, bzp, brp, base) {
+                continue;
+            }
+
+            let mut ccx = [0.0f32; 8];
+            let mut ccy = [0.0f32; 8];
+            let mut ccz = [0.0f32; 8];
+            let mut ext = [0.0f32; 8];
+            for (i, c) in chunk.iter().enumerate() {
+                ccx[i] = c.center.x;
+                ccy[i] = c.center.y;
+                ccz[i] = c.center.z;
+                ext[i] = plane.normal.dot(c.axes[0]).abs() * c.half_extents[0]
+                    + plane.normal.dot(c.axes[1]).abs() * c.half_extents[1]
+                    + plane.normal.dot(c.axes[2]).abs() * c.half_extents[2];
+            }
+            let center_proj = nx * f32x8::new(ccx) + ny * f32x8::new(ccy) + nz * f32x8::new(ccz);
+            let sep = center_proj - f32x8::new(ext) - d;
+            if sep.simd_le(zero).any() {
+                return true;
+            }
+        }
+
+        remainder.iter().any(|c| plane.collides(c))
+    }
+
+    pub fn plane_vs_cylinders_broad(plane: &Plane, col: &BroadCollection<Cylinder>) -> bool {
+        let items = col.items();
+        let broad = &col.broad;
+        let bxp = broad.x().as_ptr();
+        let byp = broad.y().as_ptr();
+        let bzp = broad.z().as_ptr();
+        let brp = broad.r().as_ptr();
+
+        let nx = f32x8::splat(plane.normal.x);
+        let ny = f32x8::splat(plane.normal.y);
+        let nz = f32x8::splat(plane.normal.z);
+        let d = f32x8::splat(plane.d);
+        let zero = f32x8::ZERO;
+
+        let chunks = items.chunks_exact(8);
+        let remainder = chunks.remainder();
+
+        for (chunk_idx, chunk) in chunks.enumerate() {
+            let base = chunk_idx * 8;
+            if !broad_plane_overlaps_chunk(nx, ny, nz, d, bxp, byp, bzp, brp, base) {
+                continue;
+            }
+
+            let mut sep_arr = [0.0f32; 8];
+            for (i, c) in chunk.iter().enumerate() {
+                let proj1 = plane.normal.dot(c.p1);
+                let proj2 = plane.normal.dot(c.p1 + c.dir);
+                let min_proj = proj1.min(proj2);
+
+                let dir_sq = c.dir.dot(c.dir);
+                let n_dot_dir = plane.normal.dot(c.dir);
+                let n_perp_sq = if dir_sq > f32::EPSILON {
+                    (1.0 - n_dot_dir * n_dot_dir / dir_sq).max(0.0)
+                } else {
+                    1.0
+                };
+                let disc_extent = c.radius * n_perp_sq.sqrt();
+                sep_arr[i] = min_proj - disc_extent - plane.d;
+            }
+            if f32x8::new(sep_arr).simd_le(zero).any() {
+                return true;
+            }
+        }
+
+        remainder.iter().any(|c| plane.collides(c))
     }
 }

@@ -944,14 +944,11 @@ macro_rules! impl_collider_query_sphere {
                 (c.mask & Collider::<$pcl>::MASK_SPHERES != 0 && c.spheres.any_collides_sphere(self))
                     || (c.mask & Collider::<$pcl>::MASK_POINTS != 0 && c.points.collides_only_broadphase(self))
                     || (c.mask & Collider::<$pcl>::MASK_CAPSULES != 0
-                        && c.capsules.collides_only_broadphase(self)
-                        && soa::batch::sphere_vs_capsules(self, c.capsules.items()))
+                        && soa::batch::sphere_vs_capsules_broad(self, &c.capsules))
                     || (c.mask & Collider::<$pcl>::MASK_CUBOIDS != 0
-                        && c.cuboids.collides_only_broadphase(self)
-                        && soa::batch::sphere_vs_cuboids(self, c.cuboids.items()))
+                        && soa::batch::sphere_vs_cuboids_broad(self, &c.cuboids))
                     || (c.mask & Collider::<$pcl>::MASK_CYLINDERS != 0
-                        && c.cylinders.collides_only_broadphase(self)
-                        && soa::batch::sphere_vs_cylinders(self, c.cylinders.items()))
+                        && soa::batch::sphere_vs_cylinders_broad(self, &c.cylinders))
                     || (c.mask & Collider::<$pcl>::MASK_SEGMENTS != 0 && c.segments.collides(self))
                     || (c.mask & Collider::<$pcl>::MASK_POLYGONS != 0 && c.polygons.collides(self))
                     || (c.mask & Collider::<$pcl>::MASK_POLYTOPES != 0 && c.polytopes.collides(self))
@@ -973,9 +970,9 @@ macro_rules! impl_collider_query_plane {
             fn query_collider(&self, c: &Collider<$pcl>) -> bool {
                 if c.mask == 0 { return false; }
                 (c.mask & Collider::<$pcl>::MASK_SPHERES != 0 && soa::batch::plane_vs_spheres_soa(self, &c.spheres))
-                    || (c.mask & Collider::<$pcl>::MASK_CAPSULES != 0 && soa::batch::plane_vs_capsules(self, c.capsules.items()))
-                    || (c.mask & Collider::<$pcl>::MASK_CUBOIDS != 0 && soa::batch::plane_vs_cuboids(self, c.cuboids.items()))
-                    || (c.mask & Collider::<$pcl>::MASK_CYLINDERS != 0 && soa::batch::plane_vs_cylinders(self, c.cylinders.items()))
+                    || (c.mask & Collider::<$pcl>::MASK_CAPSULES != 0 && soa::batch::plane_vs_capsules_broad(self, &c.capsules))
+                    || (c.mask & Collider::<$pcl>::MASK_CUBOIDS != 0 && soa::batch::plane_vs_cuboids_broad(self, &c.cuboids))
+                    || (c.mask & Collider::<$pcl>::MASK_CYLINDERS != 0 && soa::batch::plane_vs_cylinders_broad(self, &c.cylinders))
                     || (c.mask & Collider::<$pcl>::MASK_POINTS != 0 && c.points.iter().any(|x| self.collides(x)))
                     || (c.mask & Collider::<$pcl>::MASK_SEGMENTS != 0 && c.segments.iter().any(|x| self.collides(x)))
                     || (c.mask & Collider::<$pcl>::MASK_POLYGONS != 0 && c.polygons.iter().any(|x| self.collides(x)))
