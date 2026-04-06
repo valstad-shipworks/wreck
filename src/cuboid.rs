@@ -104,7 +104,7 @@ impl Cuboid {
     }
 
     /// Extract full-extents as an (f64, f64, f64) tuple.
-    pub fn full_size(&self) -> (f64, f64, f64) {
+    pub fn full_extents(&self) -> (f64, f64, f64) {
         (
             self.half_extents[0] as f64 * 2.0,
             self.half_extents[1] as f64 * 2.0,
@@ -137,6 +137,24 @@ impl Cuboid {
                 + axes[1] * (sy * he[1] as f64)
                 + axes[2] * (sz * he[2] as f64)
         })
+    }
+
+    /// Returns the minimum corner of this cuboid's AABB.
+    pub fn min(&self) -> Vec3 {
+        if self.axis_aligned {
+            return self.center - Vec3::from(self.half_extents);
+        }
+        let aabb = self.aabb();
+        aabb.center - Vec3::from(aabb.half_extents)
+    }
+
+    /// Returns the maximum corner of this cuboid's AABB.
+    pub fn max(&self) -> Vec3 {
+        if self.axis_aligned {
+            return self.center + Vec3::from(self.half_extents);
+        }
+        let aabb = self.aabb();
+        aabb.center + Vec3::from(aabb.half_extents)
     }
 
     #[inline]

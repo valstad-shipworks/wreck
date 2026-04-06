@@ -3,10 +3,11 @@ use core::fmt::Debug;
 use crate::capsule::Capsule;
 use crate::convex_polytope::heap::ConvexPolytope;
 use crate::cuboid::Cuboid;
+use crate::cylinder::Cylinder;
 use crate::line::{Line, LineSegment, Ray};
 use crate::plane::{ConvexPolygon, Plane};
 use crate::point::Point;
-use crate::pointcloud::{NoPcl, PointCloudMarker};
+use crate::pointcloud::{NoPcl, Pointcloud, PointCloudMarker};
 use crate::soa::{BroadCollection, SpheresSoA};
 use crate::sphere::Sphere;
 use crate::{Bounded, Collider, Scalable, Transformable};
@@ -84,6 +85,37 @@ impl AbsDiffEq for Capsule {
 }
 
 impl RelativeEq for Capsule {
+    fn default_max_relative() -> Self::Epsilon {
+        f32::default_max_relative()
+    }
+
+    fn relative_eq(
+        &self,
+        other: &Self,
+        epsilon: Self::Epsilon,
+        max_relative: Self::Epsilon,
+    ) -> bool {
+        self.p1.relative_eq(&other.p1, epsilon, max_relative)
+            && self.dir.relative_eq(&other.dir, epsilon, max_relative)
+            && f32::relative_eq(&self.radius, &other.radius, epsilon, max_relative)
+    }
+}
+
+impl AbsDiffEq for Cylinder {
+    type Epsilon = f32;
+
+    fn default_epsilon() -> Self::Epsilon {
+        f32::default_epsilon()
+    }
+
+    fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
+        self.p1.abs_diff_eq(other.p1, epsilon)
+            && self.dir.abs_diff_eq(other.dir, epsilon)
+            && f32::abs_diff_eq(&self.radius, &other.radius, epsilon)
+    }
+}
+
+impl RelativeEq for Cylinder {
     fn default_max_relative() -> Self::Epsilon {
         f32::default_max_relative()
     }
@@ -425,6 +457,43 @@ impl RelativeEq for NoPcl {
     }
 }
 
+impl PartialEq for Pointcloud {
+    fn eq(&self, other: &Self) -> bool {
+        self.point_radius == other.point_radius && self.spheres == other.spheres
+    }
+}
+
+impl AbsDiffEq for Pointcloud {
+    type Epsilon = f32;
+
+    fn default_epsilon() -> Self::Epsilon {
+        f32::default_epsilon()
+    }
+
+    fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
+        f32::abs_diff_eq(&self.point_radius, &other.point_radius, epsilon)
+            && self.spheres.abs_diff_eq(&other.spheres, epsilon)
+    }
+}
+
+impl RelativeEq for Pointcloud {
+    fn default_max_relative() -> Self::Epsilon {
+        f32::default_max_relative()
+    }
+
+    fn relative_eq(
+        &self,
+        other: &Self,
+        epsilon: Self::Epsilon,
+        max_relative: Self::Epsilon,
+    ) -> bool {
+        f32::relative_eq(&self.point_radius, &other.point_radius, epsilon, max_relative)
+            && self
+                .spheres
+                .relative_eq(&other.spheres, epsilon, max_relative)
+    }
+}
+
 // --- BroadCollection ---
 // Compare only the items; the broadphase SoA is derived.
 
@@ -445,15 +514,39 @@ impl AbsDiffEq for SpheresSoA {
     }
 
     fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
-        self.len() == other.len()
-            && self
-                .iter()
-                .zip(other.iter())
-                .all(|(a, b)| a.abs_diff_eq(&b, epsilon))
+        use wide::{CmpLe, f32x8};
+
+        if self.len() != other.len() {
+            return false;
+        }
+        let n = self.len();
+        let simd_n = n & !7;
+        let eps = f32x8::splat(epsilon);
+        let pairs = [
+            (self.x(), other.x()),
+            (self.y(), other.y()),
+            (self.z(), other.z()),
+            (self.r(), other.r()),
+        ];
+        for (sa, sb) in pairs {
+            for i in (0..simd_n).step_by(8) {
+                let a = f32x8::new(sa[i..i + 8].try_into().unwrap());
+                let b = f32x8::new(sb[i..i + 8].try_into().unwrap());
+                if !(a - b).abs().simd_le(eps).all() {
+                    return false;
+                }
+            }
+            for i in simd_n..n {
+                if (sa[i] - sb[i]).abs() > epsilon {
+                    return false;
+                }
+            }
+        }
+        true
     }
 }
 
-impl approx::RelativeEq for SpheresSoA {
+impl RelativeEq for SpheresSoA {
     fn default_max_relative() -> Self::Epsilon {
         f32::default_max_relative()
     }
@@ -464,17 +557,46 @@ impl approx::RelativeEq for SpheresSoA {
         epsilon: Self::Epsilon,
         max_relative: Self::Epsilon,
     ) -> bool {
-        self.len() == other.len()
-            && self
-                .iter()
-                .zip(other.iter())
-                .all(|(a, b)| a.relative_eq(&b, epsilon, max_relative))
+        use wide::{CmpLe, f32x8};
+
+        if self.len() != other.len() {
+            return false;
+        }
+        let n = self.len();
+        let simd_n = n & !7;
+        let eps = f32x8::splat(epsilon);
+        let max_rel = f32x8::splat(max_relative);
+        let pairs = [
+            (self.x(), other.x()),
+            (self.y(), other.y()),
+            (self.z(), other.z()),
+            (self.r(), other.r()),
+        ];
+        for (sa, sb) in pairs {
+            for i in (0..simd_n).step_by(8) {
+                let a = f32x8::new(sa[i..i + 8].try_into().unwrap());
+                let b = f32x8::new(sb[i..i + 8].try_into().unwrap());
+                let diff = (a - b).abs();
+                let tol = eps.max(a.abs().max(b.abs()) * max_rel);
+                if !diff.simd_le(tol).all() {
+                    return false;
+                }
+            }
+            for i in simd_n..n {
+                let a = sa[i];
+                let b = sb[i];
+                if !f32::relative_eq(&a, &b, epsilon, max_relative) {
+                    return false;
+                }
+            }
+        }
+        true
     }
 }
 
 impl<T> AbsDiffEq for BroadCollection<T>
 where
-    T: Bounded + Transformable + Scalable + Debug + Clone + AbsDiffEq<Epsilon = f32>,
+    T: Bounded + Transformable + Scalable + Debug + Clone + PartialEq,
 {
     type Epsilon = f32;
 
@@ -483,18 +605,13 @@ where
     }
 
     fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
-        self.items().len() == other.items().len()
-            && self
-                .items()
-                .iter()
-                .zip(other.items().iter())
-                .all(|(a, b)| a.abs_diff_eq(b, epsilon))
+        self.broad.abs_diff_eq(&other.broad, epsilon)
     }
 }
 
 impl<T> RelativeEq for BroadCollection<T>
 where
-    T: Bounded + Transformable + Scalable + Debug + Clone + RelativeEq<Epsilon = f32>,
+    T: Bounded + Transformable + Scalable + Debug + Clone + PartialEq,
 {
     fn default_max_relative() -> Self::Epsilon {
         f32::default_max_relative()
@@ -506,17 +623,9 @@ where
         epsilon: Self::Epsilon,
         max_relative: Self::Epsilon,
     ) -> bool {
-        self.items().len() == other.items().len()
-            && self
-                .items()
-                .iter()
-                .zip(other.items().iter())
-                .all(|(a, b)| a.relative_eq(b, epsilon, max_relative))
+        self.broad.relative_eq(&other.broad, epsilon, max_relative)
     }
 }
-
-// --- Collider ---
-// Compare all shape collections and the bounding sphere.
 
 impl<PCL> PartialEq for Collider<PCL>
 where
@@ -556,11 +665,12 @@ where
             && self.spheres.abs_diff_eq(&other.spheres, epsilon)
             && self.capsules.abs_diff_eq(&other.capsules, epsilon)
             && self.cuboids.abs_diff_eq(&other.cuboids, epsilon)
+            && self.cylinders.abs_diff_eq(&other.cylinders, epsilon)
             && self.polygons.abs_diff_eq(&other.polygons, epsilon)
             && self.polytopes.abs_diff_eq(&other.polytopes, epsilon)
             && self.points.abs_diff_eq(&other.points, epsilon)
             && self.segments.abs_diff_eq(&other.segments, epsilon)
-            && self.pointclouds.abs_diff_eq(&other.pointclouds, epsilon)
+            && slice_abs_diff_eq(self.pointclouds.items(), other.pointclouds.items(), epsilon)
     }
 }
 
@@ -593,6 +703,9 @@ where
                 .cuboids
                 .relative_eq(&other.cuboids, epsilon, max_relative)
             && self
+                .cylinders
+                .relative_eq(&other.cylinders, epsilon, max_relative)
+            && self
                 .polygons
                 .relative_eq(&other.polygons, epsilon, max_relative)
             && self
@@ -604,9 +717,12 @@ where
             && self
                 .segments
                 .relative_eq(&other.segments, epsilon, max_relative)
-            && self
-                .pointclouds
-                .relative_eq(&other.pointclouds, epsilon, max_relative)
+            && slice_relative_eq(
+                self.pointclouds.items(),
+                other.pointclouds.items(),
+                epsilon,
+                max_relative,
+            )
     }
 }
 
