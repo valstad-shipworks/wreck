@@ -4,6 +4,7 @@ pub(crate) mod refer;
 
 use alloc::vec::Vec;
 #[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
 use crate::F32Ext;
 
 use glam::Vec3;

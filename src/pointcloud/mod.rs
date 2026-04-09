@@ -29,11 +29,11 @@ pub use no_pcl::NoPcl;
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Pointcloud {
-    tree: capt::Capt<3, f32, u32>,
-    spheres: SpheresSoA,
-    point_radius: f32,
-    r_range: (f32, f32),
-    inverse_transform: Option<glam::Affine3A>,
+    pub(crate) tree: capt::Capt<3, f32, u32>,
+    pub(crate) spheres: SpheresSoA,
+    pub(crate) point_radius: f32,
+    pub(crate) r_range: (f32, f32),
+    pub(crate) inverse_transform: Option<glam::Affine3A>,
 }
 
 impl Pointcloud {

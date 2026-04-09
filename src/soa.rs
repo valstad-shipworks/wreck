@@ -1118,6 +1118,7 @@ pub(crate) mod batch {
     use glam::Vec3;
     use wide::{CmpLe, f32x8};
     #[cfg(not(feature = "std"))]
+    #[allow(unused_imports)]
     use crate::F32Ext;
 
     use super::{BroadCollection, SpheresSoA};
