@@ -69,7 +69,7 @@ pub trait Scalable: Sized + Clone {
     ///
     /// For shapes with zero volume (e.g. Point, Line, InfinitePlane), this can be a no-op,
     /// since scaling a point by any factor still results in a point.
-    fn scaled(self, factor: f32) -> Self {
+    fn scaled(&self, factor: f32) -> Self {
         let mut cloned = self.clone();
         cloned.scale(factor);
         cloned
@@ -79,7 +79,7 @@ pub trait Scalable: Sized + Clone {
         self.scale(factor as f32);
     }
     #[inline]
-    fn scaled_d(self, factor: f64) -> Self {
+    fn scaled_d(&self, factor: f64) -> Self {
         self.scaled(factor as f32)
     }
 }
