@@ -231,7 +231,6 @@ fn cylinder_symmetry() {
 
 #[test]
 fn cylinder_bounded() {
-    use wreck::Bounded;
     let c = cyl();
     let bp = c.broadphase();
     assert_eq!(bp.center, Vec3::new(0.0, 0.0, 2.0));
@@ -240,7 +239,6 @@ fn cylinder_bounded() {
 
 #[test]
 fn cylinder_transform() {
-    use wreck::Transformable;
     let mut c = cyl();
     c.translate(glam::Vec3A::new(1.0, 0.0, 0.0));
     assert_eq!(c.p1, Vec3::new(1.0, 0.0, 0.0));
@@ -249,7 +247,6 @@ fn cylinder_transform() {
 
 #[test]
 fn cylinder_scale() {
-    use wreck::Scalable;
     let mut c = cyl();
     c.scale(2.0);
     assert_eq!(c.radius, 2.0);

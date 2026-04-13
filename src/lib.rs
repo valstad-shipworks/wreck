@@ -87,7 +87,7 @@ pub trait Scalable: Sized + Clone {
 pub trait Transformable: Sized + Clone {
     fn translate(&mut self, offset: glam::Vec3A);
     #[inline]
-    fn translated(self, offset: glam::Vec3A) -> Self {
+    fn translated(&self, offset: glam::Vec3A) -> Self {
         let mut cloned = self.clone();
         cloned.translate(offset);
         cloned
@@ -97,12 +97,12 @@ pub trait Transformable: Sized + Clone {
         self.translate(glam::Vec3A::from(offset.as_vec3()));
     }
     #[inline]
-    fn translated_d(self, offset: glam::DVec3) -> Self {
+    fn translated_d(&self, offset: glam::DVec3) -> Self {
         self.translated(glam::Vec3A::from(offset.as_vec3()))
     }
     fn rotate_mat(&mut self, mat: glam::Mat3A);
     #[inline]
-    fn rotated_mat(self, mat: glam::Mat3A) -> Self {
+    fn rotated_mat(&self, mat: glam::Mat3A) -> Self {
         let mut cloned = self.clone();
         cloned.rotate_mat(mat);
         cloned
@@ -112,12 +112,12 @@ pub trait Transformable: Sized + Clone {
         self.rotate_mat(glam::Mat3A::from(mat.as_mat3()));
     }
     #[inline]
-    fn rotated_mat_d(self, mat: glam::DMat3) -> Self {
+    fn rotated_mat_d(&self, mat: glam::DMat3) -> Self {
         self.rotated_mat(glam::Mat3A::from(mat.as_mat3()))
     }
     fn rotate_quat(&mut self, quat: glam::Quat);
     #[inline]
-    fn rotated_quat(self, quat: glam::Quat) -> Self {
+    fn rotated_quat(&self, quat: glam::Quat) -> Self {
         let mut cloned = self.clone();
         cloned.rotate_quat(quat);
         cloned
@@ -127,12 +127,12 @@ pub trait Transformable: Sized + Clone {
         self.rotate_quat(quat.as_quat());
     }
     #[inline]
-    fn rotated_quat_d(self, quat: glam::DQuat) -> Self {
+    fn rotated_quat_d(&self, quat: glam::DQuat) -> Self {
         self.rotated_quat(quat.as_quat())
     }
     fn transform(&mut self, mat: glam::Affine3A);
     #[inline]
-    fn transformed(self, mat: glam::Affine3A) -> Self {
+    fn transformed(&self, mat: glam::Affine3A) -> Self {
         let mut cloned = self.clone();
         cloned.transform(mat);
         cloned
@@ -142,7 +142,7 @@ pub trait Transformable: Sized + Clone {
         self.transform(glam::Affine3A::from(mat.as_affine3()));
     }
     #[inline]
-    fn transformed_d(self, mat: glam::DAffine3) -> Self {
+    fn transformed_d(&self, mat: glam::DAffine3) -> Self {
         self.transformed(glam::Affine3A::from(mat.as_affine3()))
     }
 }
@@ -597,6 +597,84 @@ impl<PCL: PointCloudMarker> Collider<PCL> {
         Self::default()
     }
 
+    pub fn clone_from(colliders: &[&Collider<PCL>]) -> Self {
+        let mut capsule_len = 0;
+        let mut cuboid_len = 0;
+        let mut cylinder_len = 0;
+        let mut plane_len = 0;
+        let mut polygon_len = 0;
+        let mut polytope_len = 0;
+        let mut point_len = 0;
+        let mut sphere_len = 0;
+        let mut line_len = 0;
+        let mut ray_len = 0;
+        let mut segment_len = 0;
+        let mut pointcloud_len = 0;
+
+        for c in colliders {
+            capsule_len += c.capsules.len();
+            cuboid_len += c.cuboids.len();
+            cylinder_len += c.cylinders.len();
+            plane_len += c.planes.len();
+            polygon_len += c.polygons.len();
+            polytope_len += c.polytopes.len();
+            point_len += c.points.len();
+            sphere_len += c.spheres.len();
+            line_len += c.lines.len();
+            ray_len += c.rays.len();
+            segment_len += c.segments.len();
+            pointcloud_len += c.pointclouds.len();
+        }
+
+        let mut capsules = soa::BroadCollection::with_capacity(capsule_len);
+        let mut cuboids = soa::BroadCollection::with_capacity(cuboid_len);
+        let mut cylinders = soa::BroadCollection::with_capacity(cylinder_len);
+        let mut planes = Vec::with_capacity(plane_len);
+        let mut polygons = soa::BroadCollection::with_capacity(polygon_len);
+        let mut polytopes = soa::BroadCollection::with_capacity(polytope_len);
+        let mut points = soa::BroadCollection::with_capacity(point_len);
+        let mut spheres = soa::SpheresSoA::with_capacity(sphere_len);
+        let mut lines = Vec::with_capacity(line_len);
+        let mut rays = Vec::with_capacity(ray_len);
+        let mut segments = soa::BroadCollection::with_capacity(segment_len);
+        let mut pointclouds = soa::BroadCollection::with_capacity(pointcloud_len);
+
+        for c in colliders {
+            capsules.extend_from_slice(c.capsules.items());
+            cuboids.extend_from_slice(c.cuboids.items());
+            cylinders.extend_from_slice(c.cylinders.items());
+            planes.extend_from_slice(&c.planes);
+            polygons.extend_from_slice(c.polygons.items());
+            polytopes.extend_from_slice(c.polytopes.items());
+            points.extend_from_slice(c.points.items());
+            spheres.extend_from(&c.spheres);
+            lines.extend_from_slice(&c.lines);
+            rays.extend_from_slice(&c.rays);
+            segments.extend_from_slice(c.segments.items());
+            pointclouds.extend_from_slice(c.pointclouds.items());
+        }
+
+        let mut collider = Self {
+            capsules,
+            cuboids,
+            cylinders,
+            planes,
+            polygons,
+            polytopes,
+            points,
+            spheres,
+            lines,
+            rays,
+            segments,
+            pointclouds,
+            bounding: Sphere::new(glam::Vec3::ZERO, 0.0),
+            mask: 0,
+        };
+        collider.recompute_bounding();
+        collider.recompute_mask();
+        collider
+    }
+
     /// Expand the cached bounding sphere to enclose `other`.
     fn expand_bounding(&mut self, other: &Sphere) {
         if self.bounding.radius == 0.0 && self.bounding.center == glam::Vec3::ZERO {
@@ -854,6 +932,50 @@ impl<PCL: PointCloudMarker> Collider<PCL> {
             self.bounding.radius = f32::INFINITY;
         } else {
             self.expand_bounding(&other.bounding);
+        }
+    }
+}
+
+impl From<Collider<Pointcloud>> for Collider<NoPcl> {
+    fn from(collider: Collider<Pointcloud>) -> Self {
+        let mut mask = collider.mask;
+        mask &= !Collider::<Pointcloud>::MASK_POINTCLOUDS;
+        Self {
+            capsules: collider.capsules,
+            cuboids: collider.cuboids,
+            cylinders: collider.cylinders,
+            planes: collider.planes,
+            polygons: collider.polygons,
+            polytopes: collider.polytopes,
+            points: collider.points,
+            spheres: collider.spheres,
+            lines: collider.lines,
+            rays: collider.rays,
+            segments: collider.segments,
+            pointclouds: Default::default(),
+            bounding: collider.bounding,
+            mask,
+        }
+    }
+}
+
+impl From<Collider<NoPcl>> for Collider<Pointcloud> {
+    fn from(collider: Collider<NoPcl>) -> Self {
+        Self {
+            capsules: collider.capsules,
+            cuboids: collider.cuboids,
+            cylinders: collider.cylinders,
+            planes: collider.planes,
+            polygons: collider.polygons,
+            polytopes: collider.polytopes,
+            points: collider.points,
+            spheres: collider.spheres,
+            lines: collider.lines,
+            rays: collider.rays,
+            segments: collider.segments,
+            pointclouds: Default::default(),
+            bounding: collider.bounding,
+            mask: collider.mask,
         }
     }
 }

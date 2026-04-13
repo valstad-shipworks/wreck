@@ -238,6 +238,40 @@ impl SpheresSoA {
         other.clear();
     }
 
+    pub fn extend_from(&mut self, other: &Self) {
+        if other.len == 0 {
+            return;
+        }
+        let new_len = self.len + other.len;
+        let new_padded = pad(new_len);
+        let mut buf = vec![0.0f32; 4 * new_padded];
+
+        let sp = self.padded;
+        let op = other.padded;
+        let sl = self.len;
+        let ol = other.len;
+
+        buf[..sl].copy_from_slice(&self.buf[..sl]);
+        buf[sl..sl + ol].copy_from_slice(&other.buf[..ol]);
+
+        buf[new_padded..new_padded + sl].copy_from_slice(&self.buf[sp..sp + sl]);
+        buf[new_padded + sl..new_padded + sl + ol].copy_from_slice(&other.buf[op..op + ol]);
+
+        buf[2 * new_padded..2 * new_padded + sl].copy_from_slice(&self.buf[2 * sp..2 * sp + sl]);
+        buf[2 * new_padded + sl..2 * new_padded + sl + ol].copy_from_slice(&other.buf[2 * op..2 * op + ol]);
+
+        buf[3 * new_padded..3 * new_padded + sl].copy_from_slice(&self.buf[3 * sp..3 * sp + sl]);
+        buf[3 * new_padded + sl..3 * new_padded + sl + ol].copy_from_slice(&other.buf[3 * op..3 * op + ol]);
+
+        for i in new_len..new_padded {
+            buf[3 * new_padded + i] = f32::NAN;
+        }
+
+        self.buf = buf;
+        self.padded = new_padded;
+        self.len = new_len;
+    }
+
     pub fn clear(&mut self) {
         let p = self.padded;
         for i in 0..self.len {
@@ -955,6 +989,20 @@ where
     pub fn new(items: Vec<T>) -> Self {
         let broad = SpheresSoA::from_bounded(&items);
         Self { items, broad }
+    }
+
+    pub fn with_capacity(cap: usize) -> Self {
+        Self {
+            items: Vec::with_capacity(cap),
+            broad: SpheresSoA::with_capacity(cap),
+        }
+    }
+
+    pub fn extend_from_slice(&mut self, items: &[T]) {
+        self.items.reserve(items.len());
+        for item in items {
+            self.push(item.clone());
+        }
     }
 
     pub fn push(&mut self, item: T) {
