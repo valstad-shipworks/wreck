@@ -1,9 +1,17 @@
+use core::fmt;
+
 use crate::convex_polytope::array::ArrayConvexPolytope;
 use crate::{Bounded, Collides, Cuboid, Scalable, Sphere, Stretchable, Transformable};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct NoPcl;
+
+impl fmt::Display for NoPcl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "NoPcl")
+    }
+}
 
 macro_rules! impl_collides_nopcl {
     ($($ty:ty),* $(,)?) => {$(

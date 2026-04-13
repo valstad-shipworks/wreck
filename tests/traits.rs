@@ -1,7 +1,7 @@
 use static_assertions::{assert_impl_all, assert_not_impl_any};
 use wreck::*;
 
-// Every bounded shape except Pointcloud must implement CollidesWithEverything<Pointcloud>.
+// Every bounded shape must implement CollidesWithEverything<Pointcloud>.
 assert_impl_all!(Sphere: CollidesWithEverything<Pointcloud>);
 assert_impl_all!(Capsule: CollidesWithEverything<Pointcloud>);
 assert_impl_all!(Cuboid: CollidesWithEverything<Pointcloud>);
@@ -9,7 +9,7 @@ assert_impl_all!(ConvexPolytope: CollidesWithEverything<Pointcloud>);
 assert_impl_all!(Point: CollidesWithEverything<Pointcloud>);
 assert_impl_all!(ConvexPolygon: CollidesWithEverything<Pointcloud>);
 assert_impl_all!(LineSegment: CollidesWithEverything<Pointcloud>);
-assert_not_impl_any!(Pointcloud: CollidesWithEverything<Pointcloud>);
+assert_impl_all!(Pointcloud: CollidesWithEverything<Pointcloud>);
 
 // Unbounded types (Plane, Line, Ray) do not implement CollidesWithEverything
 // because they lack Bounded.

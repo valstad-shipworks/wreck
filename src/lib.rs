@@ -368,6 +368,29 @@ impl<PCL: PointCloudMarker> Default for Collider<PCL> {
     }
 }
 
+impl<PCL: PointCloudMarker> core::fmt::Display for Collider<PCL> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "Collider(spheres: {}, capsules: {}, cuboids: {}, cylinders: {}, \
+             planes: {}, polygons: {}, polytopes: {}, points: {}, \
+             lines: {}, rays: {}, segments: {}, pointclouds: {})",
+            self.spheres.len(),
+            self.capsules.len(),
+            self.cuboids.len(),
+            self.cylinders.len(),
+            self.planes.len(),
+            self.polygons.len(),
+            self.polytopes.len(),
+            self.points.len(),
+            self.lines.len(),
+            self.rays.len(),
+            self.segments.len(),
+            self.pointclouds.len(),
+        )
+    }
+}
+
 impl<PCL: PointCloudMarker> Transformable for Collider<PCL> {
     fn translate(&mut self, offset: glam::Vec3A) {
         let m = self.mask;
@@ -589,6 +612,29 @@ impl Stretchable for Collider<NoPcl> {
         out.recompute_bounding();
         out.recompute_mask();
         out
+    }
+}
+
+impl Collider<Pointcloud> {
+    /// Attempts to stretch the collider by the given translation.
+    /// Returns `None` if the collider contains pointclouds, since
+    /// pointclouds cannot be stretched.
+    #[must_use]
+    pub fn try_stretch(&self, translation: glam::Vec3) -> Option<Collider<NoPcl>> {
+        if !self.pointclouds.is_empty() {
+            return None;
+        }
+        let no_pcl: Collider<NoPcl> = self.clone().into();
+        Some(no_pcl.stretch(translation))
+    }
+
+    /// Attempts to stretch the collider by the given translation (double precision).
+    /// Returns `None` if the collider contains pointclouds, since
+    /// pointclouds cannot be stretched.
+    #[inline]
+    #[must_use]
+    pub fn try_stretch_d(&self, translation: glam::DVec3) -> Option<Collider<NoPcl>> {
+        self.try_stretch(translation.as_vec3())
     }
 }
 
@@ -980,6 +1026,75 @@ impl From<Collider<NoPcl>> for Collider<Pointcloud> {
     }
 }
 
+#[cfg(feature = "serde")]
+impl<PCL> serde::Serialize for Collider<PCL>
+where
+    PCL: PointCloudMarker + serde::Serialize,
+{
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut s = serializer.serialize_struct("Collider", 12)?;
+        s.serialize_field("capsules", &self.capsules)?;
+        s.serialize_field("cuboids", &self.cuboids)?;
+        s.serialize_field("cylinders", &self.cylinders)?;
+        s.serialize_field("planes", &self.planes)?;
+        s.serialize_field("polygons", &self.polygons)?;
+        s.serialize_field("polytopes", &self.polytopes)?;
+        s.serialize_field("points", &self.points)?;
+        s.serialize_field("spheres", &self.spheres)?;
+        s.serialize_field("lines", &self.lines)?;
+        s.serialize_field("rays", &self.rays)?;
+        s.serialize_field("segments", &self.segments)?;
+        s.serialize_field("pointclouds", &self.pointclouds)?;
+        s.end()
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de, PCL> serde::Deserialize<'de> for Collider<PCL>
+where
+    PCL: PointCloudMarker + serde::Deserialize<'de>,
+{
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(bound = "P: PointCloudMarker + serde::Deserialize<'de>")]
+        struct ColliderHelper<P: PointCloudMarker> {
+            capsules: soa::BroadCollection<Capsule>,
+            cuboids: soa::BroadCollection<Cuboid>,
+            cylinders: soa::BroadCollection<Cylinder>,
+            planes: Vec<Plane>,
+            polygons: soa::BroadCollection<ConvexPolygon>,
+            polytopes: soa::BroadCollection<ConvexPolytope>,
+            points: soa::BroadCollection<Point>,
+            spheres: soa::SpheresSoA,
+            lines: Vec<Line>,
+            rays: Vec<Ray>,
+            segments: soa::BroadCollection<LineSegment>,
+            pointclouds: soa::BroadCollection<P>,
+        }
+        let h = ColliderHelper::<PCL>::deserialize(deserializer)?;
+        let mut collider = Self {
+            capsules: h.capsules,
+            cuboids: h.cuboids,
+            cylinders: h.cylinders,
+            planes: h.planes,
+            polygons: h.polygons,
+            polytopes: h.polytopes,
+            points: h.points,
+            spheres: h.spheres,
+            lines: h.lines,
+            rays: h.rays,
+            segments: h.segments,
+            pointclouds: h.pointclouds,
+            bounding: Sphere::new(glam::Vec3::ZERO, 0.0),
+            mask: 0,
+        };
+        collider.recompute_bounding();
+        collider.recompute_mask();
+        Ok(collider)
+    }
+}
+
 /// Trait for types that can query a [`Collider`] for collisions.
 /// Each shape type implements this with its own optimized dispatch path,
 /// so `Collider::collides` and `collides_other` just call through here.
@@ -1164,24 +1279,29 @@ macro_rules! impl_collider_query_segment {
 impl_collider_query_segment!(NoPcl);
 impl_collider_query_segment!(Pointcloud);
 
-/// Pointcloud: can only query NoPcl colliders.
-impl ColliderQuery<NoPcl> for Pointcloud {
-    fn query_collider(&self, c: &Collider<NoPcl>) -> bool {
-        if c.mask == 0 { return false; }
-        (c.mask & Collider::<NoPcl>::MASK_SPHERES != 0 && c.spheres.any_collides_sphere(&self.broadphase()))
-            || (c.mask & Collider::<NoPcl>::MASK_POINTS != 0 && c.points.collides(self))
-            || (c.mask & Collider::<NoPcl>::MASK_CAPSULES != 0 && c.capsules.collides(self))
-            || (c.mask & Collider::<NoPcl>::MASK_CUBOIDS != 0 && c.cuboids.collides(self))
-            || (c.mask & Collider::<NoPcl>::MASK_CYLINDERS != 0 && c.cylinders.collides(self))
-            || (c.mask & Collider::<NoPcl>::MASK_SEGMENTS != 0 && c.segments.collides(self))
-            || (c.mask & Collider::<NoPcl>::MASK_POLYGONS != 0 && c.polygons.collides(self))
-            || (c.mask & Collider::<NoPcl>::MASK_POLYTOPES != 0 && c.polytopes.collides(self))
-            || (c.mask & Collider::<NoPcl>::MASK_PLANES != 0 && c.planes.iter().any(|x| self.collides(x)))
-            || (c.mask & Collider::<NoPcl>::MASK_LINES != 0 && c.lines.iter().any(|x| self.collides(x)))
-            || (c.mask & Collider::<NoPcl>::MASK_RAYS != 0 && c.rays.iter().any(|x| self.collides(x)))
-            || (c.mask & Collider::<NoPcl>::MASK_POINTCLOUDS != 0 && c.pointclouds.collides(self))
-    }
+macro_rules! impl_collider_query_pointcloud {
+    ($pcl:ty) => {
+        impl ColliderQuery<$pcl> for Pointcloud {
+            fn query_collider(&self, c: &Collider<$pcl>) -> bool {
+                if c.mask == 0 { return false; }
+                (c.mask & Collider::<$pcl>::MASK_SPHERES != 0 && c.spheres.any_collides_sphere(&self.broadphase()))
+                    || (c.mask & Collider::<$pcl>::MASK_POINTS != 0 && c.points.collides(self))
+                    || (c.mask & Collider::<$pcl>::MASK_CAPSULES != 0 && c.capsules.collides(self))
+                    || (c.mask & Collider::<$pcl>::MASK_CUBOIDS != 0 && c.cuboids.collides(self))
+                    || (c.mask & Collider::<$pcl>::MASK_CYLINDERS != 0 && c.cylinders.collides(self))
+                    || (c.mask & Collider::<$pcl>::MASK_SEGMENTS != 0 && c.segments.collides(self))
+                    || (c.mask & Collider::<$pcl>::MASK_POLYGONS != 0 && c.polygons.collides(self))
+                    || (c.mask & Collider::<$pcl>::MASK_POLYTOPES != 0 && c.polytopes.collides(self))
+                    || (c.mask & Collider::<$pcl>::MASK_PLANES != 0 && c.planes.iter().any(|x| self.collides(x)))
+                    || (c.mask & Collider::<$pcl>::MASK_LINES != 0 && c.lines.iter().any(|x| self.collides(x)))
+                    || (c.mask & Collider::<$pcl>::MASK_RAYS != 0 && c.rays.iter().any(|x| self.collides(x)))
+                    || (c.mask & Collider::<$pcl>::MASK_POINTCLOUDS != 0 && c.pointclouds.collides(self))
+            }
+        }
+    };
 }
+impl_collider_query_pointcloud!(NoPcl);
+impl_collider_query_pointcloud!(Pointcloud);
 
 macro_rules! impl_collider_collides_other {
     ($pcl:ty) => {
@@ -1225,4 +1345,35 @@ macro_rules! impl_collider_collides_other {
 }
 
 impl_collider_collides_other!(NoPcl);
-impl_collider_collides_other!(Pointcloud);
+
+impl Collider<Pointcloud> {
+    #[must_use]
+    pub fn collides_other(&self, other: &Collider<Pointcloud>) -> bool {
+        if self.mask == 0 || other.mask == 0 {
+            return false;
+        }
+        if !self.bounding.collides(&other.bounding) {
+            return false;
+        }
+        let single_type = |m: u16| m & (m - 1) == 0;
+        if !(single_type(self.mask) && single_type(other.mask))
+            && !other.broad_overlaps_any(&self.bounding)
+            && !self.broad_overlaps_any(&other.bounding)
+        {
+            return false;
+        }
+
+        (other.mask & Self::MASK_SPHERES != 0 && self.spheres.any_collides_soa(&other.spheres))
+            || (other.mask & Self::MASK_POINTS != 0 && other.points.iter().any(|x| self.collides(x)))
+            || (other.mask & Self::MASK_CAPSULES != 0 && other.capsules.iter().any(|x| self.collides(x)))
+            || (other.mask & Self::MASK_CUBOIDS != 0 && other.cuboids.iter().any(|x| self.collides(x)))
+            || (other.mask & Self::MASK_CYLINDERS != 0 && other.cylinders.iter().any(|x| self.collides(x)))
+            || (other.mask & Self::MASK_SEGMENTS != 0 && other.segments.iter().any(|x| self.collides(x)))
+            || (other.mask & Self::MASK_POLYGONS != 0 && other.polygons.iter().any(|x| self.collides(x)))
+            || (other.mask & Self::MASK_POLYTOPES != 0 && other.polytopes.iter().any(|x| self.collides(x)))
+            || (other.mask & Self::MASK_PLANES != 0 && other.planes.iter().any(|x| self.collides(x)))
+            || (other.mask & Self::MASK_LINES != 0 && other.lines.iter().any(|x| self.collides(x)))
+            || (other.mask & Self::MASK_RAYS != 0 && other.rays.iter().any(|x| self.collides(x)))
+            || (other.mask & Self::MASK_POINTCLOUDS != 0 && other.pointclouds.iter().any(|x| self.collides(x)))
+    }
+}

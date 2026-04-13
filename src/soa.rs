@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use core::fmt::Debug;
+use core::fmt::{self, Debug, Display};
 
 use glam::Vec3;
 use wide::{CmpLe, f32x8};
@@ -66,6 +66,12 @@ impl<'de> serde::Deserialize<'de> for SpheresSoA {
         buf.extend_from_slice(&h.z);
         buf.extend_from_slice(&h.r);
         Ok(Self { buf, padded, len: h.len })
+    }
+}
+
+impl Display for SpheresSoA {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "SpheresSoA(len: {})", self.len)
     }
 }
 
@@ -1070,6 +1076,15 @@ where
     }
 }
 
+impl<T> Display for BroadCollection<T>
+where
+    T: Bounded + Transformable + Scalable + Debug + Clone + Sized,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "BroadCollection(len: {})", self.items.len())
+    }
+}
+
 impl<T> BroadCollection<T>
 where
     T: Bounded + Transformable + Scalable + Debug + Clone + Sized,
@@ -1697,5 +1712,26 @@ pub(crate) mod batch {
         }
 
         remainder.iter().any(|c| plane.collides(c))
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<T> serde::Serialize for BroadCollection<T>
+where
+    T: Bounded + Transformable + Scalable + Debug + Clone + Sized + serde::Serialize,
+{
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.items.serialize(serializer)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de, T> serde::Deserialize<'de> for BroadCollection<T>
+where
+    T: Bounded + Transformable + Scalable + Debug + Clone + Sized + serde::Deserialize<'de>,
+{
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let items = Vec::<T>::deserialize(deserializer)?;
+        Ok(Self::new(items))
     }
 }

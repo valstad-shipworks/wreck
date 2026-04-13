@@ -187,6 +187,17 @@ impl Bounded for Pointcloud {
     }
 }
 
+impl core::fmt::Display for Pointcloud {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "Pointcloud(points: {}, radius: {})",
+            self.point_count(),
+            self.point_radius
+        )
+    }
+}
+
 // Sphere-CAPT: delegate to capt crate, SIMD batch for collides_many
 impl Collides<Sphere> for Pointcloud {
     #[inline]
@@ -769,6 +780,95 @@ impl LineAccess for LineSegment {
 impl_line_pcl!(Line, f32::NEG_INFINITY, f32::INFINITY);
 impl_line_pcl!(Ray, 0.0, f32::INFINITY);
 impl_line_pcl!(LineSegment, 0.0, 1.0);
+
+impl Collides<Pointcloud> for Pointcloud {
+    fn test<const BROADPHASE: bool>(&self, other: &Pointcloud) -> bool {
+        if self.point_count() == 0 || other.point_count() == 0 {
+            return false;
+        }
+
+        let (iter_cloud, tree_cloud) = if self.point_count() <= other.point_count() {
+            (self, other)
+        } else {
+            (other, self)
+        };
+
+        let combined_radius = iter_cloud.point_radius + tree_cloud.point_radius;
+
+        let transform = match (&iter_cloud.inverse_transform, &tree_cloud.inverse_transform) {
+            (None, None) => None,
+            (None, Some(inv)) => Some(*inv),
+            (Some(fwd_inv), None) => Some(fwd_inv.inverse()),
+            (Some(fwd_inv), Some(tree_inv)) => Some(*tree_inv * fwd_inv.inverse()),
+        };
+
+        let sxs = iter_cloud.spheres.x();
+        let sys = iter_cloud.spheres.y();
+        let szs = iter_cloud.spheres.z();
+
+        if let Some(mat) = &transform {
+            let full_chunks = iter_cloud.full_chunks();
+            let radii = f32x8::splat(combined_radius);
+            for i in 0..full_chunks {
+                let base = i * 8;
+                let px = f32x8::new(sxs[base..base + 8].try_into().unwrap());
+                let py = f32x8::new(sys[base..base + 8].try_into().unwrap());
+                let pz = f32x8::new(szs[base..base + 8].try_into().unwrap());
+
+                let m = &mat.matrix3;
+                let tx = f32x8::splat(mat.translation.x);
+                let ty = f32x8::splat(mat.translation.y);
+                let tz = f32x8::splat(mat.translation.z);
+                let m00 = f32x8::splat(m.x_axis.x);
+                let m01 = f32x8::splat(m.y_axis.x);
+                let m02 = f32x8::splat(m.z_axis.x);
+                let m10 = f32x8::splat(m.x_axis.y);
+                let m11 = f32x8::splat(m.y_axis.y);
+                let m12 = f32x8::splat(m.z_axis.y);
+                let m20 = f32x8::splat(m.x_axis.z);
+                let m21 = f32x8::splat(m.y_axis.z);
+                let m22 = f32x8::splat(m.z_axis.z);
+
+                let ox = m00 * px + m01 * py + m02 * pz + tx;
+                let oy = m10 * px + m11 * py + m12 * pz + ty;
+                let oz = m20 * px + m21 * py + m22 * pz + tz;
+
+                if tree_cloud.tree.collides_simd(&[ox, oy, oz], radii) {
+                    return true;
+                }
+            }
+
+            for i in iter_cloud.remainder_start()..iter_cloud.point_count() {
+                let p = glam::Vec3A::new(sxs[i], sys[i], szs[i]);
+                let tp = mat.transform_point3a(p);
+                if tree_cloud.tree.collides(&[tp.x, tp.y, tp.z], combined_radius) {
+                    return true;
+                }
+            }
+        } else {
+            let full_chunks = iter_cloud.full_chunks();
+            let radii = f32x8::splat(combined_radius);
+            for i in 0..full_chunks {
+                let base = i * 8;
+                let px = f32x8::new(sxs[base..base + 8].try_into().unwrap());
+                let py = f32x8::new(sys[base..base + 8].try_into().unwrap());
+                let pz = f32x8::new(szs[base..base + 8].try_into().unwrap());
+
+                if tree_cloud.tree.collides_simd(&[px, py, pz], radii) {
+                    return true;
+                }
+            }
+
+            for i in iter_cloud.remainder_start()..iter_cloud.point_count() {
+                if tree_cloud.tree.collides(&[sxs[i], sys[i], szs[i]], combined_radius) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+}
 
 pub trait PointCloudMarker:
     __private::Sealed + Sized + Clone + Debug + Transformable + Scalable + Bounded
