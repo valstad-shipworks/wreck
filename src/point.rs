@@ -214,6 +214,36 @@ impl Collides<Point> for LineSegment {
     }
 }
 
+#[cfg(feature = "sdf")]
+#[inline]
+fn point_sphere_signed_distance(point: &Point, sphere: &Sphere) -> f32 {
+    (point.0 - sphere.center).length() - sphere.radius
+}
+
+#[cfg(feature = "sdf")]
+impl crate::SignedDistance<Sphere> for Point {
+    #[inline]
+    fn signed_distance(&self, other: &Sphere) -> f32 {
+        point_sphere_signed_distance(self, other)
+    }
+}
+
+#[cfg(feature = "sdf")]
+impl crate::SignedDistance<Point> for Sphere {
+    #[inline]
+    fn signed_distance(&self, other: &Point) -> f32 {
+        point_sphere_signed_distance(other, self)
+    }
+}
+
+#[cfg(feature = "sdf")]
+impl crate::SignedDistance<Point> for Point {
+    #[inline]
+    fn signed_distance(&self, other: &Point) -> f32 {
+        (self.0 - other.0).length()
+    }
+}
+
 impl fmt::Display for Point {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Point([{}, {}, {}])", self.0.x, self.0.y, self.0.z)

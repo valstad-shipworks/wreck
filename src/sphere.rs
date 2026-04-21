@@ -118,6 +118,14 @@ impl Stretchable for Sphere {
     }
 }
 
+#[cfg(feature = "sdf")]
+impl crate::SignedDistance<Sphere> for Sphere {
+    #[inline]
+    fn signed_distance(&self, other: &Sphere) -> f32 {
+        (self.center - other.center).length() - (self.radius + other.radius)
+    }
+}
+
 impl fmt::Display for Sphere {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let c = self.center;

@@ -5,7 +5,7 @@ use core::fmt;
 use crate::F32Ext;
 
 use glam::{DMat3, DVec3, Vec3};
-use wide::{CmpLe, f32x8};
+use wide::{CmpGt, CmpLe, f32x8};
 
 use inherent::inherent;
 
@@ -195,6 +195,40 @@ impl Cuboid {
         }
         dist_sq
     }
+
+    /// Signed distance from a point to the cuboid surface.
+    ///
+    /// Negative inside the cuboid (magnitude = distance to the nearest face),
+    /// zero on the surface, positive outside (magnitude = Euclidean distance
+    /// to the nearest surface point).
+    #[cfg(feature = "sdf")]
+    #[inline]
+    pub fn point_signed_distance(&self, point: Vec3) -> f32 {
+        #[cfg(not(feature = "std"))]
+        #[allow(unused_imports)]
+        use crate::F32Ext;
+
+        let d = point - self.center;
+        let (d0, d1, d2) = if self.axis_aligned {
+            (d.x.abs(), d.y.abs(), d.z.abs())
+        } else {
+            (
+                d.dot(self.axes[0]).abs(),
+                d.dot(self.axes[1]).abs(),
+                d.dot(self.axes[2]).abs(),
+            )
+        };
+        let q = [
+            d0 - self.half_extents[0],
+            d1 - self.half_extents[1],
+            d2 - self.half_extents[2],
+        ];
+        let outside_sq = q[0].max(0.0) * q[0].max(0.0)
+            + q[1].max(0.0) * q[1].max(0.0)
+            + q[2].max(0.0) * q[2].max(0.0);
+        let inside = q[0].max(q[1]).max(q[2]).min(0.0);
+        outside_sq.sqrt() + inside
+    }
 }
 
 impl Cuboid {
@@ -308,6 +342,306 @@ impl Collides<Sphere> for Cuboid {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, other: &Sphere) -> bool {
         sphere_cuboid_collides(other, self)
+    }
+}
+
+#[cfg(feature = "sdf")]
+#[inline]
+fn sphere_cuboid_signed_distance(sphere: &Sphere, cuboid: &Cuboid) -> f32 {
+    cuboid.point_signed_distance(sphere.center) - sphere.radius
+}
+
+#[cfg(feature = "sdf")]
+impl crate::SignedDistance<Cuboid> for Sphere {
+    #[inline]
+    fn signed_distance(&self, other: &Cuboid) -> f32 {
+        sphere_cuboid_signed_distance(self, other)
+    }
+}
+
+#[cfg(feature = "sdf")]
+impl crate::SignedDistance<Sphere> for Cuboid {
+    #[inline]
+    fn signed_distance(&self, other: &Sphere) -> f32 {
+        sphere_cuboid_signed_distance(other, self)
+    }
+}
+
+/// Signed distance from a parametric ray `origin + t·direction` restricted to
+/// `t ∈ (t_min, t_max)` to this cuboid's surface.
+///
+/// The cuboid SDF is globally convex, so its restriction to the line is a
+/// convex 1D function whose minimum lies at an endpoint (if finite) or at a
+/// piecewise breakpoint. Samples `point_signed_distance` at:
+///   - finite endpoints,
+///   - face-plane crossings (`p_i(t) = ±he_i`, 6 candidates),
+///   - axis-plane crossings (`p_i(t) = 0`, 3 candidates — kinks in `|p_i|`),
+///   - equal-distance crossings (`|p_i|-he_i = |p_j|-he_j`, up to 12
+///     candidates per pair/sign combination — kinks where the interior
+///     argmax switches axes).
+///
+/// Pass `f32::NEG_INFINITY` / `f32::INFINITY` for unbounded t.
+#[cfg(feature = "sdf")]
+pub(crate) fn parametric_cuboid_signed_distance(
+    origin: Vec3,
+    direction: Vec3,
+    t_min: f32,
+    t_max: f32,
+    cuboid: &Cuboid,
+) -> f32 {
+    let c = cuboid.center;
+    let axes: [Vec3; 3] = if cuboid.axis_aligned {
+        [Vec3::X, Vec3::Y, Vec3::Z]
+    } else {
+        cuboid.axes
+    };
+    let he = cuboid.half_extents;
+
+    let p1_proj = [
+        (origin - c).dot(axes[0]),
+        (origin - c).dot(axes[1]),
+        (origin - c).dot(axes[2]),
+    ];
+    let d_proj = [
+        direction.dot(axes[0]),
+        direction.dot(axes[1]),
+        direction.dot(axes[2]),
+    ];
+
+    let mut min_sd = f32::INFINITY;
+    if t_min.is_finite() {
+        let sd = cuboid.point_signed_distance(origin + direction * t_min);
+        if sd < min_sd {
+            min_sd = sd;
+        }
+    }
+    if t_max.is_finite() {
+        let sd = cuboid.point_signed_distance(origin + direction * t_max);
+        if sd < min_sd {
+            min_sd = sd;
+        }
+    }
+
+    let try_t = |t: f32, min_sd: &mut f32| {
+        if t > t_min && t < t_max {
+            let sd = cuboid.point_signed_distance(origin + direction * t);
+            if sd < *min_sd {
+                *min_sd = sd;
+            }
+        }
+    };
+
+    for i in 0..3 {
+        if d_proj[i].abs() < 1e-12 {
+            continue;
+        }
+        for sign in [-1.0f32, 1.0f32] {
+            try_t((sign * he[i] - p1_proj[i]) / d_proj[i], &mut min_sd);
+        }
+        try_t(-p1_proj[i] / d_proj[i], &mut min_sd);
+    }
+
+    for i in 0..3 {
+        for j in (i + 1)..3 {
+            for si in [-1.0f32, 1.0f32] {
+                for sj in [-1.0f32, 1.0f32] {
+                    let denom = si * d_proj[i] - sj * d_proj[j];
+                    if denom.abs() < 1e-12 {
+                        continue;
+                    }
+                    let numer = he[i] - he[j] - si * p1_proj[i] + sj * p1_proj[j];
+                    try_t(numer / denom, &mut min_sd);
+                }
+            }
+        }
+    }
+
+    min_sd
+}
+
+#[cfg(feature = "sdf")]
+#[inline]
+fn segment_cuboid_signed_distance(p1: Vec3, p2: Vec3, cuboid: &Cuboid) -> f32 {
+    let d = p2 - p1;
+    let min_sd = parametric_cuboid_signed_distance(p1, d, 0.0, 1.0, cuboid);
+    cuboid
+        .point_signed_distance(p1)
+        .min(cuboid.point_signed_distance(p2))
+        .min(min_sd)
+}
+
+#[cfg(feature = "sdf")]
+#[inline]
+fn capsule_cuboid_signed_distance(capsule: &Capsule, cuboid: &Cuboid) -> f32 {
+    segment_cuboid_signed_distance(capsule.p1, capsule.p2(), cuboid) - capsule.radius
+}
+
+#[cfg(feature = "sdf")]
+impl crate::SignedDistance<Cuboid> for Capsule {
+    #[inline]
+    fn signed_distance(&self, other: &Cuboid) -> f32 {
+        capsule_cuboid_signed_distance(self, other)
+    }
+}
+
+#[cfg(feature = "sdf")]
+impl crate::SignedDistance<Capsule> for Cuboid {
+    #[inline]
+    fn signed_distance(&self, other: &Capsule) -> f32 {
+        capsule_cuboid_signed_distance(other, self)
+    }
+}
+
+/// Signed distance between two oriented cuboids via the Separating Axis Theorem.
+///
+/// For each of the 15 SAT axes (3 face normals per cuboid + 9 edge-edge cross
+/// products), the signed gap is `|Δ·a| − (rA + rB)` where `rA`, `rB` are the
+/// projected half-extents. The SDF is the maximum gap across axes.
+///
+/// - Overlapping: all gaps are negative; the maximum (least-negative) is the
+///   minimum penetration depth — exact among the SAT axes (SAT-optimal).
+/// - Separated: at least one gap is positive; the maximum is the separation
+///   along the best separating axis. This is a tight lower bound on the
+///   Euclidean distance between the cuboids (exact when axis-aligned and
+///   separated along a single axis; a conservative underestimate when the
+///   closest features are a pair of vertices or edges not aligned with any
+///   SAT axis). Exact Euclidean distance for arbitrary OBBs requires GJK.
+#[cfg(feature = "sdf")]
+#[inline]
+fn cuboid_cuboid_signed_distance(a: &Cuboid, b: &Cuboid) -> f32 {
+    let delta = b.center - a.center;
+
+    // Pack the 15 SAT axes into two f32x8 batches (padding the last slot).
+    // Lane layout of batch 1: a.x, a.y, a.z, b.x, b.y, b.z, a.x×b.x, a.x×b.y
+    // Lane layout of batch 2: a.x×b.z, a.y×b.x, a.y×b.y, a.y×b.z, a.z×b.x,
+    //                          a.z×b.y, a.z×b.z, <pad>
+    let cross_axes = [
+        a.axes[0].cross(b.axes[0]),
+        a.axes[0].cross(b.axes[1]),
+        a.axes[0].cross(b.axes[2]),
+        a.axes[1].cross(b.axes[0]),
+        a.axes[1].cross(b.axes[1]),
+        a.axes[1].cross(b.axes[2]),
+        a.axes[2].cross(b.axes[0]),
+        a.axes[2].cross(b.axes[1]),
+        a.axes[2].cross(b.axes[2]),
+    ];
+
+    let pad = Vec3::new(1.0, 0.0, 0.0);
+
+    let all_axes: [Vec3; 16] = [
+        a.axes[0],
+        a.axes[1],
+        a.axes[2],
+        b.axes[0],
+        b.axes[1],
+        b.axes[2],
+        cross_axes[0],
+        cross_axes[1],
+        cross_axes[2],
+        cross_axes[3],
+        cross_axes[4],
+        cross_axes[5],
+        cross_axes[6],
+        cross_axes[7],
+        cross_axes[8],
+        pad,
+    ];
+
+    fn compute_batch(axes: &[Vec3; 8], a: &Cuboid, b: &Cuboid, delta: Vec3) -> f32x8 {
+        let ax = f32x8::new([
+            axes[0].x, axes[1].x, axes[2].x, axes[3].x, axes[4].x, axes[5].x, axes[6].x, axes[7].x,
+        ]);
+        let ay = f32x8::new([
+            axes[0].y, axes[1].y, axes[2].y, axes[3].y, axes[4].y, axes[5].y, axes[6].y, axes[7].y,
+        ]);
+        let az = f32x8::new([
+            axes[0].z, axes[1].z, axes[2].z, axes[3].z, axes[4].z, axes[5].z, axes[6].z, axes[7].z,
+        ]);
+
+        let len_sq = ax * ax + ay * ay + az * az;
+        let inv_len = f32x8::splat(1.0) / len_sq.sqrt();
+
+        let nx = ax * inv_len;
+        let ny = ay * inv_len;
+        let nz = az * inv_len;
+
+        #[inline]
+        fn proj_he_abs(
+            nx: f32x8,
+            ny: f32x8,
+            nz: f32x8,
+            axes: [Vec3; 3],
+            he: [f32; 3],
+        ) -> f32x8 {
+            let mut r = f32x8::splat(0.0);
+            for i in 0..3 {
+                let dot = nx * f32x8::splat(axes[i].x)
+                    + ny * f32x8::splat(axes[i].y)
+                    + nz * f32x8::splat(axes[i].z);
+                r += f32x8::splat(he[i]) * dot.abs();
+            }
+            r
+        }
+
+        let ra = proj_he_abs(nx, ny, nz, a.axes, a.half_extents);
+        let rb = proj_he_abs(nx, ny, nz, b.axes, b.half_extents);
+
+        let delta_dot = nx * f32x8::splat(delta.x)
+            + ny * f32x8::splat(delta.y)
+            + nz * f32x8::splat(delta.z);
+
+        let gap = delta_dot.abs() - (ra + rb);
+
+        // For degenerate axes (len_sq near 0, inv_len = +inf), the math
+        // produces NaN. Zero those lanes out so they don't dominate max.
+        let mask = len_sq.simd_gt(f32x8::splat(1e-12));
+        mask.blend(gap, f32x8::splat(f32::NEG_INFINITY))
+    }
+
+    let batch1_arr: [Vec3; 8] = [
+        all_axes[0],
+        all_axes[1],
+        all_axes[2],
+        all_axes[3],
+        all_axes[4],
+        all_axes[5],
+        all_axes[6],
+        all_axes[7],
+    ];
+    let batch2_arr: [Vec3; 8] = [
+        all_axes[8],
+        all_axes[9],
+        all_axes[10],
+        all_axes[11],
+        all_axes[12],
+        all_axes[13],
+        all_axes[14],
+        all_axes[15],
+    ];
+
+    // The pad axis at batch2 lane 7 is (1,0,0), a valid SAT direction (it
+    // coincides with a.axes[0] in this layout — redundant but not spurious).
+    // Adding it as a 16th axis cannot change the SAT result, so no masking
+    // is needed.
+    let gaps1 = compute_batch(&batch1_arr, a, b, delta);
+    let gaps2 = compute_batch(&batch2_arr, a, b, delta);
+    let combined = gaps1.max(gaps2);
+    let arr = combined.to_array();
+    let mut max_gap = arr[0];
+    for &v in &arr[1..] {
+        if v > max_gap {
+            max_gap = v;
+        }
+    }
+    max_gap
+}
+
+#[cfg(feature = "sdf")]
+impl crate::SignedDistance<Cuboid> for Cuboid {
+    #[inline]
+    fn signed_distance(&self, other: &Cuboid) -> f32 {
+        cuboid_cuboid_signed_distance(self, other)
     }
 }
 

@@ -16,6 +16,9 @@ pub(crate) mod line;
 pub(crate) mod plane;
 pub(crate) mod pointcloud;
 
+#[cfg(feature = "sdf")]
+pub mod sdf;
+
 mod util;
 pub(crate) use util::*;
 
@@ -44,6 +47,9 @@ pub use plane::Plane;
 pub use point::Point;
 pub use pointcloud::Pointcloud;
 pub use sphere::Sphere;
+
+#[cfg(feature = "sdf")]
+pub use sdf::SignedDistance;
 
 pub use crate::pointcloud::NoPcl;
 use crate::pointcloud::PointCloudMarker;

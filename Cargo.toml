@@ -16,6 +16,7 @@ wreck-assert = []
 approx = ["dep:approx", "glam/approx"]
 serde = ["dep:serde", "glam/serde"]
 quote = ["dep:quote", "dep:proc-macro2"]
+sdf = []
 
 [dependencies]
 glam = { version = "0.32.1", default-features = false }
@@ -41,3 +42,8 @@ harness = false
 [[bench]]
 name = "transforms"
 harness = false
+
+[[bench]]
+name = "sdf"
+harness = false
+required-features = ["sdf"]

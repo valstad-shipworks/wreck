@@ -105,6 +105,28 @@ impl Collides<Plane> for Sphere {
     }
 }
 
+#[cfg(feature = "sdf")]
+#[inline]
+fn plane_sphere_signed_distance(plane: &Plane, sphere: &Sphere) -> f32 {
+    plane.normal.dot(sphere.center) - plane.d - sphere.radius
+}
+
+#[cfg(feature = "sdf")]
+impl crate::SignedDistance<Sphere> for Plane {
+    #[inline]
+    fn signed_distance(&self, other: &Sphere) -> f32 {
+        plane_sphere_signed_distance(self, other)
+    }
+}
+
+#[cfg(feature = "sdf")]
+impl crate::SignedDistance<Plane> for Sphere {
+    #[inline]
+    fn signed_distance(&self, other: &Plane) -> f32 {
+        plane_sphere_signed_distance(other, self)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Plane – Capsule
 // ---------------------------------------------------------------------------
@@ -128,6 +150,31 @@ impl Collides<Plane> for Capsule {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, plane: &Plane) -> bool {
         plane_capsule_collides(plane, self)
+    }
+}
+
+#[cfg(feature = "sdf")]
+#[inline]
+fn plane_capsule_signed_distance(plane: &Plane, capsule: &Capsule) -> f32 {
+    let p2 = capsule.p2();
+    let proj1 = plane.normal.dot(capsule.p1);
+    let proj2 = plane.normal.dot(p2);
+    proj1.min(proj2) - plane.d - capsule.radius
+}
+
+#[cfg(feature = "sdf")]
+impl crate::SignedDistance<Capsule> for Plane {
+    #[inline]
+    fn signed_distance(&self, other: &Capsule) -> f32 {
+        plane_capsule_signed_distance(self, other)
+    }
+}
+
+#[cfg(feature = "sdf")]
+impl crate::SignedDistance<Plane> for Capsule {
+    #[inline]
+    fn signed_distance(&self, other: &Plane) -> f32 {
+        plane_capsule_signed_distance(other, self)
     }
 }
 
@@ -155,6 +202,32 @@ impl Collides<Plane> for Cuboid {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, plane: &Plane) -> bool {
         plane_cuboid_collides(plane, self)
+    }
+}
+
+#[cfg(feature = "sdf")]
+#[inline]
+fn plane_cuboid_signed_distance(plane: &Plane, cuboid: &Cuboid) -> f32 {
+    let center_proj = plane.normal.dot(cuboid.center);
+    let extent_proj = plane.normal.dot(cuboid.axes[0]).abs() * cuboid.half_extents[0]
+        + plane.normal.dot(cuboid.axes[1]).abs() * cuboid.half_extents[1]
+        + plane.normal.dot(cuboid.axes[2]).abs() * cuboid.half_extents[2];
+    center_proj - extent_proj - plane.d
+}
+
+#[cfg(feature = "sdf")]
+impl crate::SignedDistance<Cuboid> for Plane {
+    #[inline]
+    fn signed_distance(&self, other: &Cuboid) -> f32 {
+        plane_cuboid_signed_distance(self, other)
+    }
+}
+
+#[cfg(feature = "sdf")]
+impl crate::SignedDistance<Plane> for Cuboid {
+    #[inline]
+    fn signed_distance(&self, other: &Plane) -> f32 {
+        plane_cuboid_signed_distance(other, self)
     }
 }
 

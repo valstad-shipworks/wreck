@@ -884,3 +884,116 @@ impl PointCloudMarker for NoPcl {}
 mod __private {
     pub trait Sealed {}
 }
+
+// ---------------------------------------------------------------------------
+// Pointcloud SDF impls — minimum over all point-spheres.
+//
+// Each point is a sphere of radius `point_radius`, so the cloud's signed
+// distance to a target shape is the minimum of `Sphere::signed_distance`
+// evaluated over every point. If an `inverse_transform` is set, the target
+// is mapped into the cloud's local frame first (distance is invariant under
+// rigid transforms).
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "sdf")]
+use crate::SignedDistance;
+
+#[cfg(feature = "sdf")]
+#[inline]
+fn pcl_min_sphere_sdf<T>(pcl: &Pointcloud, target: &T) -> f32
+where
+    Sphere: SignedDistance<T>,
+{
+    let mut min_sd = f32::INFINITY;
+    for s in pcl.spheres.iter() {
+        let sd = s.signed_distance(target);
+        if sd < min_sd {
+            min_sd = sd;
+        }
+    }
+    min_sd
+}
+
+#[cfg(feature = "sdf")]
+macro_rules! impl_pcl_sdf {
+    ($target:ty) => {
+        impl $crate::SignedDistance<$target> for Pointcloud {
+            fn signed_distance(&self, other: &$target) -> f32 {
+                if let Some(inv) = &self.inverse_transform {
+                    let mut t = other.clone();
+                    t.transform(*inv);
+                    pcl_min_sphere_sdf(self, &t)
+                } else {
+                    pcl_min_sphere_sdf(self, other)
+                }
+            }
+        }
+        impl $crate::SignedDistance<Pointcloud> for $target {
+            #[inline]
+            fn signed_distance(&self, other: &Pointcloud) -> f32 {
+                other.signed_distance(self)
+            }
+        }
+    };
+}
+
+#[cfg(feature = "sdf")]
+impl SignedDistance<Sphere> for Pointcloud {
+    #[inline]
+    fn signed_distance(&self, other: &Sphere) -> f32 {
+        let target = if let Some(inv) = &self.inverse_transform {
+            let mut t = *other;
+            t.transform(*inv);
+            t
+        } else {
+            *other
+        };
+        self.spheres.min_sphere_sdf(&target)
+    }
+}
+#[cfg(feature = "sdf")]
+impl SignedDistance<Pointcloud> for Sphere {
+    #[inline]
+    fn signed_distance(&self, other: &Pointcloud) -> f32 {
+        other.signed_distance(self)
+    }
+}
+#[cfg(feature = "sdf")]
+impl_pcl_sdf!(crate::Point);
+#[cfg(feature = "sdf")]
+impl_pcl_sdf!(Capsule);
+#[cfg(feature = "sdf")]
+impl_pcl_sdf!(Cuboid);
+#[cfg(feature = "sdf")]
+impl_pcl_sdf!(Cylinder);
+#[cfg(feature = "sdf")]
+impl_pcl_sdf!(Plane);
+#[cfg(feature = "sdf")]
+impl_pcl_sdf!(ConvexPolygon);
+#[cfg(feature = "sdf")]
+impl_pcl_sdf!(ConvexPolytope);
+#[cfg(feature = "sdf")]
+impl_pcl_sdf!(Line);
+#[cfg(feature = "sdf")]
+impl_pcl_sdf!(Ray);
+#[cfg(feature = "sdf")]
+impl_pcl_sdf!(LineSegment);
+
+#[cfg(feature = "sdf")]
+impl SignedDistance<Pointcloud> for Pointcloud {
+    fn signed_distance(&self, other: &Pointcloud) -> f32 {
+        let mut min_sd = f32::INFINITY;
+        let (iter_cloud, other_cloud) = if self.point_count() <= other.point_count() {
+            (self, other)
+        } else {
+            (other, self)
+        };
+        for s in iter_cloud.spheres.iter() {
+            let sd = other_cloud.signed_distance(&s);
+            if sd < min_sd {
+                min_sd = sd;
+            }
+        }
+        min_sd
+    }
+}

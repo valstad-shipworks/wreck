@@ -5,6 +5,7 @@ A 3D collision detection library for Rust. Built on top of `glam` for math and `
 ## Traits
 
 - `Collides<T>` - boolean collision test between two shapes. Every pair of built-in shapes has an implementation in both directions.
+- `SignedDistance<T>` - signed Euclidean distance between two shapes (positive when disjoint, zero when touching, negative when interpenetrating). Gated behind the `sdf` feature.
 - `Scalable` - uniform scaling of a shape.
 - `Transformable` - translate, rotate (via `Mat3` or `Quat`), or apply a full `Affine3` transform.
 - `Stretchable` - sweep a shape along a translation vector, producing the convex hull of the motion.
@@ -193,7 +194,27 @@ let swept = Cuboid::from_aabb(Vec3::splat(-1.0), Vec3::splat(1.0))
     .stretch(Vec3::new(1.0, 1.0, 0.0));
 ```
 
+### Signed distance fields
+
+The `sdf` feature enables `SignedDistance<T>` impls for every shape pair:
+
+```rust
+use wreck::{Sphere, Cuboid, SignedDistance};
+use glam::Vec3;
+
+let s = Sphere::new(Vec3::new(3.0, 0.0, 0.0), 1.0);
+let c = Cuboid::from_aabb(Vec3::splat(-1.0), Vec3::splat(1.0));
+
+// positive => disjoint, zero => touching, negative => penetration depth
+let d = s.signed_distance(&c);
+assert!(d > 0.0);
+```
+
+Custom convex shapes can plug into the system by implementing `wreck::sdf::SupportFn`
+and routing through `wreck::sdf::gjk_epa_signed_distance` — see the `sdf` module docs.
+
 ## Features
 
+- `sdf` — enables the `SignedDistance<T>` trait and all pair implementations
 - `wreck-assert` — enables internal assertions in all builds
 - `debug-wreck-assert` — enables internal assertions in debug builds only

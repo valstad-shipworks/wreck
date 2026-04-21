@@ -235,6 +235,29 @@ impl Collides<Sphere> for Capsule {
     }
 }
 
+#[cfg(feature = "sdf")]
+#[inline]
+fn sphere_capsule_signed_distance(sphere: &Sphere, capsule: &Capsule) -> f32 {
+    let closest = capsule.closest_point_to(sphere.center);
+    (sphere.center - closest).length() - (sphere.radius + capsule.radius)
+}
+
+#[cfg(feature = "sdf")]
+impl crate::SignedDistance<Capsule> for Sphere {
+    #[inline]
+    fn signed_distance(&self, other: &Capsule) -> f32 {
+        sphere_capsule_signed_distance(self, other)
+    }
+}
+
+#[cfg(feature = "sdf")]
+impl crate::SignedDistance<Sphere> for Capsule {
+    #[inline]
+    fn signed_distance(&self, other: &Sphere) -> f32 {
+        sphere_capsule_signed_distance(other, self)
+    }
+}
+
 // Capsule-Capsule: closest distance between two line segments (Ericson RTCD)
 impl Collides<Capsule> for Capsule {
     #[inline]
@@ -314,6 +337,18 @@ pub(crate) fn segment_segment_dist_sq(p1: Vec3, d1: Vec3, p2: Vec3, d2: Vec3) ->
     let closest2 = p2 + d2 * t;
     let diff = closest1 - closest2;
     diff.dot(diff)
+}
+
+#[cfg(feature = "sdf")]
+impl crate::SignedDistance<Capsule> for Capsule {
+    #[inline]
+    fn signed_distance(&self, other: &Capsule) -> f32 {
+        #[cfg(not(feature = "std"))]
+        #[allow(unused_imports)]
+        use crate::F32Ext;
+        let dist_sq = segment_segment_dist_sq(self.p1, self.dir, other.p1, other.dir);
+        dist_sq.sqrt() - (self.radius + other.radius)
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -437,6 +437,79 @@ impl SpheresSoA {
         any_hit
     }
 
+    /// SIMD-accelerated minimum signed distance between the SoA and a single
+    /// target sphere. Uses f32x8 lanes for the bulk of centers+radii, with a
+    /// scalar tail for the partial last chunk (padded lanes carry NaN radii
+    /// so we cannot fold them into the SIMD min).
+    ///
+    /// Returns `f32::INFINITY` when the SoA is empty.
+    #[cfg(feature = "sdf")]
+    #[inline]
+    pub fn min_sphere_sdf(&self, target: &crate::Sphere) -> f32 {
+        #[cfg(not(feature = "std"))]
+        #[allow(unused_imports)]
+        use crate::F32Ext;
+
+        if self.is_empty() {
+            return f32::INFINITY;
+        }
+
+        let tx = f32x8::splat(target.center.x);
+        let ty = f32x8::splat(target.center.y);
+        let tz = f32x8::splat(target.center.z);
+        let tr = f32x8::splat(target.radius);
+
+        let full_chunks = self.len / 8;
+        let xp = self.x().as_ptr();
+        let yp = self.y().as_ptr();
+        let zp = self.z().as_ptr();
+        let rp = self.r().as_ptr();
+
+        let mut min_vec = f32x8::splat(f32::INFINITY);
+
+        for i in 0..full_chunks {
+            let base = i * 8;
+            let (ox, oy, oz, or);
+            unsafe {
+                ox = f32x8::new(*xp.add(base).cast::<[f32; 8]>());
+                oy = f32x8::new(*yp.add(base).cast::<[f32; 8]>());
+                oz = f32x8::new(*zp.add(base).cast::<[f32; 8]>());
+                or = f32x8::new(*rp.add(base).cast::<[f32; 8]>());
+            }
+            let dx = ox - tx;
+            let dy = oy - ty;
+            let dz = oz - tz;
+            let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+            let sdf = dist - or - tr;
+            min_vec = min_vec.min(sdf);
+        }
+
+        let arr = min_vec.to_array();
+        let mut best = arr[0];
+        for &v in &arr[1..] {
+            if v < best {
+                best = v;
+            }
+        }
+
+        let xs = self.x();
+        let ys = self.y();
+        let zs = self.z();
+        let rs = self.r();
+        for i in (full_chunks * 8)..self.len {
+            let dx = xs[i] - target.center.x;
+            let dy = ys[i] - target.center.y;
+            let dz = zs[i] - target.center.z;
+            let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+            let sdf = dist - rs[i] - target.radius;
+            if sdf < best {
+                best = sdf;
+            }
+        }
+
+        best
+    }
+
     /// Test if any sphere in `self` collides with any sphere in `other`.
     ///
     /// For each sphere in `self`, broadcasts its position across all chunks

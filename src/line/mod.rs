@@ -167,7 +167,94 @@ pub(crate) fn line_infinite_plane_collides(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Parametric SDF helpers (shared by Line, Ray, LineSegment)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "sdf")]
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use crate::F32Ext;
+
+/// Squared perpendicular distance from a point to the parametric ray
+/// `origin + t·direction`, with `t` clamped to `[t_min, t_max]`.
+#[cfg(feature = "sdf")]
+#[inline]
+pub(crate) fn parametric_point_dist_sq(
+    origin: Vec3,
+    direction: Vec3,
+    rdv: f32,
+    t_min: f32,
+    t_max: f32,
+    point: Vec3,
+) -> f32 {
+    let t = closest_t_to_point(origin, direction, rdv, point, t_min, t_max);
+    let foot = origin + direction * t;
+    let v = point - foot;
+    v.dot(v)
+}
+
+/// Unsigned distance between two parametric rays, each with its own t-range.
+/// Standard Lumsdaine/Ericson solver; handles parallel lines and half-infinite
+/// ranges uniformly.
+#[cfg(feature = "sdf")]
+pub(crate) fn parametric_pair_dist_sq(
+    o1: Vec3,
+    d1: Vec3,
+    s_min: f32,
+    s_max: f32,
+    o2: Vec3,
+    d2: Vec3,
+    t_min: f32,
+    t_max: f32,
+) -> f32 {
+    let r = o1 - o2;
+    let a = d1.dot(d1);
+    let e = d2.dot(d2);
+    let b = d1.dot(d2);
+    let c = d1.dot(r);
+    let f = d2.dot(r);
+    let eps = f32::EPSILON;
+
+    let denom = a * e - b * b;
+
+    let (s, t) = if denom.abs() > eps && a > eps && e > eps {
+        let s0 = ((b * f - c * e) / denom).clamp(s_min, s_max);
+        let mut t0 = (b * s0 + f) / e;
+        if t0 < t_min {
+            let t1 = t_min;
+            let s1 = ((b * t1 - c) / a).clamp(s_min, s_max);
+            (s1, t1)
+        } else if t0 > t_max {
+            let t1 = t_max;
+            let s1 = ((b * t1 - c) / a).clamp(s_min, s_max);
+            (s1, t1)
+        } else {
+            t0 = t0.clamp(t_min, t_max);
+            (s0, t0)
+        }
+    } else if a > eps {
+        let t1 = (0.0f32).clamp(t_min, t_max);
+        let s1 = ((b * t1 - c) / a).clamp(s_min, s_max);
+        (s1, t1)
+    } else if e > eps {
+        let s1 = (0.0f32).clamp(s_min, s_max);
+        let t1 = ((b * s1 + f) / e).clamp(t_min, t_max);
+        (s1, t1)
+    } else {
+        (
+            (0.0f32).clamp(s_min, s_max),
+            (0.0f32).clamp(t_min, t_max),
+        )
+    };
+
+    let diff = (o1 + d1 * s) - (o2 + d2 * t);
+    diff.dot(diff)
+}
+
+// ---------------------------------------------------------------------------
 // Zero-thickness pairs — always false in 3D
+// ---------------------------------------------------------------------------
 
 use crate::Collides;
 
@@ -231,5 +318,327 @@ impl Collides<Ray> for LineSegment {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, _other: &Ray) -> bool {
         false
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Parametric-curve SDF impls
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "sdf")]
+use crate::point::Point;
+#[cfg(feature = "sdf")]
+use crate::SignedDistance;
+
+#[cfg(feature = "sdf")]
+const LINE_T_MIN: f32 = f32::NEG_INFINITY;
+#[cfg(feature = "sdf")]
+const LINE_T_MAX: f32 = f32::INFINITY;
+#[cfg(feature = "sdf")]
+const RAY_T_MIN: f32 = 0.0;
+#[cfg(feature = "sdf")]
+const RAY_T_MAX: f32 = f32::INFINITY;
+#[cfg(feature = "sdf")]
+const SEG_T_MIN: f32 = 0.0;
+#[cfg(feature = "sdf")]
+const SEG_T_MAX: f32 = 1.0;
+
+// Line SDF impls --------------------------------------------------------
+
+#[cfg(feature = "sdf")]
+impl SignedDistance<Sphere> for Line {
+    #[inline]
+    fn signed_distance(&self, other: &Sphere) -> f32 {
+        parametric_point_dist_sq(
+            self.origin, self.dir, self.rdv, LINE_T_MIN, LINE_T_MAX, other.center,
+        )
+        .sqrt()
+            - other.radius
+    }
+}
+#[cfg(feature = "sdf")]
+impl SignedDistance<Line> for Sphere {
+    #[inline]
+    fn signed_distance(&self, other: &Line) -> f32 {
+        other.signed_distance(self)
+    }
+}
+
+#[cfg(feature = "sdf")]
+impl SignedDistance<Point> for Line {
+    #[inline]
+    fn signed_distance(&self, other: &Point) -> f32 {
+        parametric_point_dist_sq(self.origin, self.dir, self.rdv, LINE_T_MIN, LINE_T_MAX, other.0)
+            .sqrt()
+    }
+}
+#[cfg(feature = "sdf")]
+impl SignedDistance<Line> for Point {
+    #[inline]
+    fn signed_distance(&self, other: &Line) -> f32 {
+        other.signed_distance(self)
+    }
+}
+
+#[cfg(feature = "sdf")]
+impl SignedDistance<Capsule> for Line {
+    #[inline]
+    fn signed_distance(&self, other: &Capsule) -> f32 {
+        parametric_pair_dist_sq(
+            self.origin, self.dir, LINE_T_MIN, LINE_T_MAX, other.p1, other.dir, 0.0, 1.0,
+        )
+        .sqrt()
+            - other.radius
+    }
+}
+#[cfg(feature = "sdf")]
+impl SignedDistance<Line> for Capsule {
+    #[inline]
+    fn signed_distance(&self, other: &Line) -> f32 {
+        other.signed_distance(self)
+    }
+}
+
+#[cfg(feature = "sdf")]
+impl SignedDistance<Plane> for Line {
+    #[inline]
+    fn signed_distance(&self, plane: &Plane) -> f32 {
+        let n_dot_d = plane.normal.dot(self.dir);
+        if n_dot_d.abs() > f32::EPSILON {
+            return f32::NEG_INFINITY;
+        }
+        plane.normal.dot(self.origin) - plane.d
+    }
+}
+#[cfg(feature = "sdf")]
+impl SignedDistance<Line> for Plane {
+    #[inline]
+    fn signed_distance(&self, other: &Line) -> f32 {
+        other.signed_distance(self)
+    }
+}
+
+#[cfg(feature = "sdf")]
+impl SignedDistance<Cuboid> for Line {
+    #[inline]
+    fn signed_distance(&self, cuboid: &Cuboid) -> f32 {
+        crate::cuboid::parametric_cuboid_signed_distance(
+            self.origin, self.dir, LINE_T_MIN, LINE_T_MAX, cuboid,
+        )
+    }
+}
+#[cfg(feature = "sdf")]
+impl SignedDistance<Line> for Cuboid {
+    #[inline]
+    fn signed_distance(&self, other: &Line) -> f32 {
+        other.signed_distance(self)
+    }
+}
+
+#[cfg(feature = "sdf")]
+impl SignedDistance<Line> for Line {
+    #[inline]
+    fn signed_distance(&self, other: &Line) -> f32 {
+        parametric_pair_dist_sq(
+            self.origin, self.dir, LINE_T_MIN, LINE_T_MAX, other.origin, other.dir, LINE_T_MIN,
+            LINE_T_MAX,
+        )
+        .sqrt()
+    }
+}
+
+// Ray SDF impls ---------------------------------------------------------
+
+#[cfg(feature = "sdf")]
+impl SignedDistance<Sphere> for Ray {
+    #[inline]
+    fn signed_distance(&self, other: &Sphere) -> f32 {
+        parametric_point_dist_sq(
+            self.origin, self.dir, self.rdv, RAY_T_MIN, RAY_T_MAX, other.center,
+        )
+        .sqrt()
+            - other.radius
+    }
+}
+#[cfg(feature = "sdf")]
+impl SignedDistance<Ray> for Sphere {
+    #[inline]
+    fn signed_distance(&self, other: &Ray) -> f32 {
+        other.signed_distance(self)
+    }
+}
+
+#[cfg(feature = "sdf")]
+impl SignedDistance<Point> for Ray {
+    #[inline]
+    fn signed_distance(&self, other: &Point) -> f32 {
+        parametric_point_dist_sq(self.origin, self.dir, self.rdv, RAY_T_MIN, RAY_T_MAX, other.0)
+            .sqrt()
+    }
+}
+#[cfg(feature = "sdf")]
+impl SignedDistance<Ray> for Point {
+    #[inline]
+    fn signed_distance(&self, other: &Ray) -> f32 {
+        other.signed_distance(self)
+    }
+}
+
+#[cfg(feature = "sdf")]
+impl SignedDistance<Capsule> for Ray {
+    #[inline]
+    fn signed_distance(&self, other: &Capsule) -> f32 {
+        parametric_pair_dist_sq(
+            self.origin, self.dir, RAY_T_MIN, RAY_T_MAX, other.p1, other.dir, 0.0, 1.0,
+        )
+        .sqrt()
+            - other.radius
+    }
+}
+#[cfg(feature = "sdf")]
+impl SignedDistance<Ray> for Capsule {
+    #[inline]
+    fn signed_distance(&self, other: &Ray) -> f32 {
+        other.signed_distance(self)
+    }
+}
+
+#[cfg(feature = "sdf")]
+impl SignedDistance<Plane> for Ray {
+    #[inline]
+    fn signed_distance(&self, plane: &Plane) -> f32 {
+        let n_dot_o = plane.normal.dot(self.origin);
+        let n_dot_d = plane.normal.dot(self.dir);
+        let origin_sd = n_dot_o - plane.d;
+        if n_dot_d < 0.0 {
+            f32::NEG_INFINITY
+        } else {
+            origin_sd
+        }
+    }
+}
+#[cfg(feature = "sdf")]
+impl SignedDistance<Ray> for Plane {
+    #[inline]
+    fn signed_distance(&self, other: &Ray) -> f32 {
+        other.signed_distance(self)
+    }
+}
+
+#[cfg(feature = "sdf")]
+impl SignedDistance<Cuboid> for Ray {
+    #[inline]
+    fn signed_distance(&self, cuboid: &Cuboid) -> f32 {
+        crate::cuboid::parametric_cuboid_signed_distance(
+            self.origin, self.dir, RAY_T_MIN, RAY_T_MAX, cuboid,
+        )
+    }
+}
+#[cfg(feature = "sdf")]
+impl SignedDistance<Ray> for Cuboid {
+    #[inline]
+    fn signed_distance(&self, other: &Ray) -> f32 {
+        other.signed_distance(self)
+    }
+}
+
+#[cfg(feature = "sdf")]
+impl SignedDistance<Ray> for Ray {
+    #[inline]
+    fn signed_distance(&self, other: &Ray) -> f32 {
+        parametric_pair_dist_sq(
+            self.origin, self.dir, RAY_T_MIN, RAY_T_MAX, other.origin, other.dir, RAY_T_MIN,
+            RAY_T_MAX,
+        )
+        .sqrt()
+    }
+}
+
+#[cfg(feature = "sdf")]
+impl SignedDistance<Line> for Ray {
+    #[inline]
+    fn signed_distance(&self, other: &Line) -> f32 {
+        parametric_pair_dist_sq(
+            self.origin, self.dir, RAY_T_MIN, RAY_T_MAX, other.origin, other.dir, LINE_T_MIN,
+            LINE_T_MAX,
+        )
+        .sqrt()
+    }
+}
+#[cfg(feature = "sdf")]
+impl SignedDistance<Ray> for Line {
+    #[inline]
+    fn signed_distance(&self, other: &Ray) -> f32 {
+        other.signed_distance(self)
+    }
+}
+
+// LineSegment SDF impls -------------------------------------------------
+
+#[cfg(feature = "sdf")]
+impl SignedDistance<Plane> for LineSegment {
+    #[inline]
+    fn signed_distance(&self, plane: &Plane) -> f32 {
+        let p2 = self.p2();
+        plane
+            .normal
+            .dot(self.p1)
+            .min(plane.normal.dot(p2))
+            - plane.d
+    }
+}
+#[cfg(feature = "sdf")]
+impl SignedDistance<LineSegment> for Plane {
+    #[inline]
+    fn signed_distance(&self, other: &LineSegment) -> f32 {
+        other.signed_distance(self)
+    }
+}
+
+#[cfg(feature = "sdf")]
+impl SignedDistance<LineSegment> for LineSegment {
+    #[inline]
+    fn signed_distance(&self, other: &LineSegment) -> f32 {
+        parametric_pair_dist_sq(
+            self.p1, self.dir, SEG_T_MIN, SEG_T_MAX, other.p1, other.dir, SEG_T_MIN, SEG_T_MAX,
+        )
+        .sqrt()
+    }
+}
+
+#[cfg(feature = "sdf")]
+impl SignedDistance<Line> for LineSegment {
+    #[inline]
+    fn signed_distance(&self, other: &Line) -> f32 {
+        parametric_pair_dist_sq(
+            self.p1, self.dir, SEG_T_MIN, SEG_T_MAX, other.origin, other.dir, LINE_T_MIN,
+            LINE_T_MAX,
+        )
+        .sqrt()
+    }
+}
+#[cfg(feature = "sdf")]
+impl SignedDistance<LineSegment> for Line {
+    #[inline]
+    fn signed_distance(&self, other: &LineSegment) -> f32 {
+        other.signed_distance(self)
+    }
+}
+
+#[cfg(feature = "sdf")]
+impl SignedDistance<Ray> for LineSegment {
+    #[inline]
+    fn signed_distance(&self, other: &Ray) -> f32 {
+        parametric_pair_dist_sq(
+            self.p1, self.dir, SEG_T_MIN, SEG_T_MAX, other.origin, other.dir, RAY_T_MIN, RAY_T_MAX,
+        )
+        .sqrt()
+    }
+}
+#[cfg(feature = "sdf")]
+impl SignedDistance<LineSegment> for Ray {
+    #[inline]
+    fn signed_distance(&self, other: &LineSegment) -> f32 {
+        other.signed_distance(self)
     }
 }
