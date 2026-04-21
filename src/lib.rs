@@ -1102,13 +1102,29 @@ pub trait ColliderQuery<PCL: PointCloudMarker>: Sized + Clone {
     fn query_collider(&self, collider: &Collider<PCL>) -> bool;
 }
 
-/// Generic broadphase + scalar narrowphase path for bounded shape types.
+/// Scalar fallback narrowphase: iterate the sphere SoA and call the shape's
+/// own `Collides<Sphere>` impl. Used for shapes (polygon, polytope) that lack
+/// a dedicated SIMD batch.
+#[inline]
+fn scalar_vs_spheres_soa<T>(shape: &T, soa: &soa::SpheresSoA) -> bool
+where
+    T: Collides<Sphere>,
+{
+    soa.iter().any(|s| shape.collides(&s))
+}
+
+/// Generic SIMD broadphase + narrowphase path for bounded shape types.
+///
+/// The `$sphere_batch` path is a true narrowphase `fn(&Self, &SpheresSoA) -> bool`
+/// — the previous `c.spheres.any_collides_sphere(&self.broadphase())` test only
+/// compared the shape's bounding sphere, which missed narrow misses inside the
+/// shape's AABB (a sphere inside a cuboid's bounding sphere but outside the OBB).
 macro_rules! impl_collider_query_generic {
-    ($ty:ty) => {
+    ($ty:ty, $sphere_batch:path) => {
         impl ColliderQuery<NoPcl> for $ty {
             fn query_collider(&self, c: &Collider<NoPcl>) -> bool {
                 if c.mask == 0 { return false; }
-                (c.mask & Collider::<NoPcl>::MASK_SPHERES != 0 && c.spheres.any_collides_sphere(&self.broadphase()))
+                (c.mask & Collider::<NoPcl>::MASK_SPHERES != 0 && $sphere_batch(self, &c.spheres))
                     || (c.mask & Collider::<NoPcl>::MASK_POINTS != 0 && c.points.collides(self))
                     || (c.mask & Collider::<NoPcl>::MASK_CAPSULES != 0 && c.capsules.collides(self))
                     || (c.mask & Collider::<NoPcl>::MASK_CUBOIDS != 0 && c.cuboids.collides(self))
@@ -1125,7 +1141,7 @@ macro_rules! impl_collider_query_generic {
         impl ColliderQuery<Pointcloud> for $ty {
             fn query_collider(&self, c: &Collider<Pointcloud>) -> bool {
                 if c.mask == 0 { return false; }
-                (c.mask & Collider::<Pointcloud>::MASK_SPHERES != 0 && c.spheres.any_collides_sphere(&self.broadphase()))
+                (c.mask & Collider::<Pointcloud>::MASK_SPHERES != 0 && $sphere_batch(self, &c.spheres))
                     || (c.mask & Collider::<Pointcloud>::MASK_POINTS != 0 && c.points.collides(self))
                     || (c.mask & Collider::<Pointcloud>::MASK_CAPSULES != 0 && c.capsules.collides(self))
                     || (c.mask & Collider::<Pointcloud>::MASK_CUBOIDS != 0 && c.cuboids.collides(self))
@@ -1142,11 +1158,11 @@ macro_rules! impl_collider_query_generic {
     };
 }
 
-impl_collider_query_generic!(Capsule);
-impl_collider_query_generic!(Cuboid);
-impl_collider_query_generic!(Cylinder);
-impl_collider_query_generic!(ConvexPolygon);
-impl_collider_query_generic!(ConvexPolytope);
+impl_collider_query_generic!(Capsule, soa::batch::capsule_vs_spheres_soa);
+impl_collider_query_generic!(Cuboid, soa::batch::cuboid_vs_spheres_soa);
+impl_collider_query_generic!(Cylinder, soa::batch::cylinder_vs_spheres_soa);
+impl_collider_query_generic!(ConvexPolygon, scalar_vs_spheres_soa::<ConvexPolygon>);
+impl_collider_query_generic!(ConvexPolytope, scalar_vs_spheres_soa::<ConvexPolytope>);
 /// Point: broadphase-only for spheres and points (zero-radius sphere check).
 macro_rules! impl_collider_query_point {
     ($pcl:ty) => {
@@ -1284,7 +1300,9 @@ macro_rules! impl_collider_query_pointcloud {
         impl ColliderQuery<$pcl> for Pointcloud {
             fn query_collider(&self, c: &Collider<$pcl>) -> bool {
                 if c.mask == 0 { return false; }
-                (c.mask & Collider::<$pcl>::MASK_SPHERES != 0 && c.spheres.any_collides_sphere(&self.broadphase()))
+                (c.mask & Collider::<$pcl>::MASK_SPHERES != 0
+                    && c.spheres.any_collides_sphere(&self.broadphase())
+                    && c.spheres.iter().any(|s| self.collides(&s)))
                     || (c.mask & Collider::<$pcl>::MASK_POINTS != 0 && c.points.collides(self))
                     || (c.mask & Collider::<$pcl>::MASK_CAPSULES != 0 && c.capsules.collides(self))
                     || (c.mask & Collider::<$pcl>::MASK_CUBOIDS != 0 && c.cuboids.collides(self))
@@ -1328,7 +1346,9 @@ macro_rules! impl_collider_collides_other {
                     return false;
                 }
 
-                (other.mask & Self::MASK_SPHERES != 0 && self.spheres.any_collides_soa(&other.spheres))
+                (other.mask & Self::MASK_SPHERES != 0
+                    && (self.spheres.any_collides_soa(&other.spheres)
+                        || other.spheres.iter().any(|x| self.collides(&x))))
                     || (other.mask & Self::MASK_POINTS != 0 && other.points.iter().any(|x| self.collides(x)))
                     || (other.mask & Self::MASK_CAPSULES != 0 && other.capsules.iter().any(|x| self.collides(x)))
                     || (other.mask & Self::MASK_CUBOIDS != 0 && other.cuboids.iter().any(|x| self.collides(x)))
@@ -1363,7 +1383,9 @@ impl Collider<Pointcloud> {
             return false;
         }
 
-        (other.mask & Self::MASK_SPHERES != 0 && self.spheres.any_collides_soa(&other.spheres))
+        (other.mask & Self::MASK_SPHERES != 0
+            && (self.spheres.any_collides_soa(&other.spheres)
+                || other.spheres.iter().any(|x| self.collides(&x))))
             || (other.mask & Self::MASK_POINTS != 0 && other.points.iter().any(|x| self.collides(x)))
             || (other.mask & Self::MASK_CAPSULES != 0 && other.capsules.iter().any(|x| self.collides(x)))
             || (other.mask & Self::MASK_CUBOIDS != 0 && other.cuboids.iter().any(|x| self.collides(x)))
