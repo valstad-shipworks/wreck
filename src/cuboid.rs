@@ -229,6 +229,63 @@ impl Cuboid {
         let inside = q[0].max(q[1]).max(q[2]).min(0.0);
         outside_sq.sqrt() + inside
     }
+
+    /// SIMD batched `point_signed_distance` — evaluates 8 points in parallel
+    /// against this cuboid. Returns an `f32x8` of signed distances lane-wise.
+    ///
+    /// Used internally by the parametric SDF sampler (which checks up to 23
+    /// candidate t-values per call) and by the Pointcloud × Cuboid fast path.
+    #[cfg(feature = "sdf")]
+    #[inline]
+    pub(crate) fn point_signed_distance_x8(
+        &self,
+        px: f32x8,
+        py: f32x8,
+        pz: f32x8,
+    ) -> f32x8 {
+        let cx = f32x8::splat(self.center.x);
+        let cy = f32x8::splat(self.center.y);
+        let cz = f32x8::splat(self.center.z);
+        let dx = px - cx;
+        let dy = py - cy;
+        let dz = pz - cz;
+
+        let (d0, d1, d2) = if self.axis_aligned {
+            (dx.abs(), dy.abs(), dz.abs())
+        } else {
+            let a0 = self.axes[0];
+            let a1 = self.axes[1];
+            let a2 = self.axes[2];
+            let d0 = (dx * f32x8::splat(a0.x)
+                + dy * f32x8::splat(a0.y)
+                + dz * f32x8::splat(a0.z))
+            .abs();
+            let d1 = (dx * f32x8::splat(a1.x)
+                + dy * f32x8::splat(a1.y)
+                + dz * f32x8::splat(a1.z))
+            .abs();
+            let d2 = (dx * f32x8::splat(a2.x)
+                + dy * f32x8::splat(a2.y)
+                + dz * f32x8::splat(a2.z))
+            .abs();
+            (d0, d1, d2)
+        };
+
+        let he0 = f32x8::splat(self.half_extents[0]);
+        let he1 = f32x8::splat(self.half_extents[1]);
+        let he2 = f32x8::splat(self.half_extents[2]);
+        let q0 = d0 - he0;
+        let q1 = d1 - he1;
+        let q2 = d2 - he2;
+
+        let zero = f32x8::splat(0.0);
+        let q0p = q0.max(zero);
+        let q1p = q1.max(zero);
+        let q2p = q2.max(zero);
+        let outside_sq = q0p * q0p + q1p * q1p + q2p * q2p;
+        let inside = q0.max(q1).max(q2).min(zero);
+        outside_sq.sqrt() + inside
+    }
 }
 
 impl Cuboid {
@@ -408,37 +465,35 @@ pub(crate) fn parametric_cuboid_signed_distance(
         direction.dot(axes[2]),
     ];
 
-    let mut min_sd = f32::INFINITY;
-    if t_min.is_finite() {
-        let sd = cuboid.point_signed_distance(origin + direction * t_min);
-        if sd < min_sd {
-            min_sd = sd;
-        }
-    }
-    if t_max.is_finite() {
-        let sd = cuboid.point_signed_distance(origin + direction * t_max);
-        if sd < min_sd {
-            min_sd = sd;
-        }
-    }
-
-    let try_t = |t: f32, min_sd: &mut f32| {
+    // Gather up to 23 candidate t-values into a fixed buffer. Populating the
+    // whole buffer unconditionally (with NaN for filtered-out candidates) lets
+    // us evaluate them in 3 f32x8 SIMD batches without any per-lane branches.
+    let mut ts = [f32::NAN; 24];
+    let mut n = 0usize;
+    let mut push = |t: f32, n: &mut usize, ts: &mut [f32; 24]| {
         if t > t_min && t < t_max {
-            let sd = cuboid.point_signed_distance(origin + direction * t);
-            if sd < *min_sd {
-                *min_sd = sd;
-            }
+            ts[*n] = t;
+            *n += 1;
         }
     };
+
+    if t_min.is_finite() {
+        ts[n] = t_min;
+        n += 1;
+    }
+    if t_max.is_finite() {
+        ts[n] = t_max;
+        n += 1;
+    }
 
     for i in 0..3 {
         if d_proj[i].abs() < 1e-12 {
             continue;
         }
-        for sign in [-1.0f32, 1.0f32] {
-            try_t((sign * he[i] - p1_proj[i]) / d_proj[i], &mut min_sd);
-        }
-        try_t(-p1_proj[i] / d_proj[i], &mut min_sd);
+        let inv = 1.0 / d_proj[i];
+        push((he[i] - p1_proj[i]) * inv, &mut n, &mut ts);
+        push((-he[i] - p1_proj[i]) * inv, &mut n, &mut ts);
+        push(-p1_proj[i] * inv, &mut n, &mut ts);
     }
 
     for i in 0..3 {
@@ -450,8 +505,39 @@ pub(crate) fn parametric_cuboid_signed_distance(
                         continue;
                     }
                     let numer = he[i] - he[j] - si * p1_proj[i] + sj * p1_proj[j];
-                    try_t(numer / denom, &mut min_sd);
+                    push(numer / denom, &mut n, &mut ts);
                 }
+            }
+        }
+    }
+
+    if n == 0 {
+        return f32::INFINITY;
+    }
+
+    // Evaluate the up-to-24 candidate t's in 3 SIMD batches. Unused/NaN lanes
+    // produce NaN SDFs which never win the min reduction (NaN compares false).
+    let ox = f32x8::splat(origin.x);
+    let oy = f32x8::splat(origin.y);
+    let oz = f32x8::splat(origin.z);
+    let dx = f32x8::splat(direction.x);
+    let dy = f32x8::splat(direction.y);
+    let dz = f32x8::splat(direction.z);
+
+    let mut min_sd = f32::INFINITY;
+    for chunk_start in (0..n).step_by(8) {
+        let mut lane_ts = [f32::NAN; 8];
+        let end = (chunk_start + 8).min(n);
+        lane_ts[..end - chunk_start].copy_from_slice(&ts[chunk_start..end]);
+        let tv = f32x8::new(lane_ts);
+        let px = ox + dx * tv;
+        let py = oy + dy * tv;
+        let pz = oz + dz * tv;
+        let sds = cuboid.point_signed_distance_x8(px, py, pz);
+        let arr = sds.to_array();
+        for (i, &sd) in arr.iter().enumerate() {
+            if (chunk_start + i) < end && sd < min_sd {
+                min_sd = sd;
             }
         }
     }
