@@ -1371,6 +1371,201 @@ pub(crate) mod batch {
         line_vs_spheres_soa_inner(seg.p1, seg.dir, seg.rdv, 0.0, 1.0, soa)
     }
 
+    /// True narrowphase sphere-OBB test: one cuboid against many spheres.
+    ///
+    /// Padding lanes use `r = NaN`, so `dist_sq <= r²` is always false for
+    /// them and they cannot produce a false positive.
+    pub fn cuboid_vs_spheres_soa(cuboid: &Cuboid, soa: &SpheresSoA) -> bool {
+        if soa.is_empty() {
+            return false;
+        }
+        let xp = soa.x().as_ptr();
+        let yp = soa.y().as_ptr();
+        let zp = soa.z().as_ptr();
+        let rp = soa.r().as_ptr();
+
+        let ccx = f32x8::splat(cuboid.center.x);
+        let ccy = f32x8::splat(cuboid.center.y);
+        let ccz = f32x8::splat(cuboid.center.z);
+
+        let ax0 = f32x8::splat(cuboid.axes[0].x);
+        let ay0 = f32x8::splat(cuboid.axes[0].y);
+        let az0 = f32x8::splat(cuboid.axes[0].z);
+        let he0 = f32x8::splat(cuboid.half_extents[0]);
+
+        let ax1 = f32x8::splat(cuboid.axes[1].x);
+        let ay1 = f32x8::splat(cuboid.axes[1].y);
+        let az1 = f32x8::splat(cuboid.axes[1].z);
+        let he1 = f32x8::splat(cuboid.half_extents[1]);
+
+        let ax2 = f32x8::splat(cuboid.axes[2].x);
+        let ay2 = f32x8::splat(cuboid.axes[2].y);
+        let az2 = f32x8::splat(cuboid.axes[2].z);
+        let he2 = f32x8::splat(cuboid.half_extents[2]);
+
+        let zero = f32x8::ZERO;
+
+        for i in 0..soa.chunk_count_8() {
+            let base = i * 8;
+            let (sx, sy, sz, sr);
+            unsafe {
+                sx = f32x8::new(*xp.add(base).cast::<[f32; 8]>());
+                sy = f32x8::new(*yp.add(base).cast::<[f32; 8]>());
+                sz = f32x8::new(*zp.add(base).cast::<[f32; 8]>());
+                sr = f32x8::new(*rp.add(base).cast::<[f32; 8]>());
+            }
+
+            let dfx = sx - ccx;
+            let dfy = sy - ccy;
+            let dfz = sz - ccz;
+
+            let proj0 = dfx * ax0 + dfy * ay0 + dfz * az0;
+            let ex0 = (proj0.max(-proj0) - he0).max(zero);
+
+            let proj1 = dfx * ax1 + dfy * ay1 + dfz * az1;
+            let ex1 = (proj1.max(-proj1) - he1).max(zero);
+
+            let proj2 = dfx * ax2 + dfy * ay2 + dfz * az2;
+            let ex2 = (proj2.max(-proj2) - he2).max(zero);
+
+            let dist_sq = ex0 * ex0 + ex1 * ex1 + ex2 * ex2;
+            let r_sq = sr * sr;
+
+            if dist_sq.simd_le(r_sq).any() {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// True narrowphase capsule-sphere test: one capsule against many spheres.
+    ///
+    /// Computes the squared distance from each sphere center to the capsule's
+    /// line segment and compares against `(sphere.radius + capsule.radius)²`.
+    pub fn capsule_vs_spheres_soa(capsule: &Capsule, soa: &SpheresSoA) -> bool {
+        if soa.is_empty() {
+            return false;
+        }
+        let xp = soa.x().as_ptr();
+        let yp = soa.y().as_ptr();
+        let zp = soa.z().as_ptr();
+        let rp = soa.r().as_ptr();
+
+        let p1x = f32x8::splat(capsule.p1.x);
+        let p1y = f32x8::splat(capsule.p1.y);
+        let p1z = f32x8::splat(capsule.p1.z);
+        let dx = f32x8::splat(capsule.dir.x);
+        let dy = f32x8::splat(capsule.dir.y);
+        let dz = f32x8::splat(capsule.dir.z);
+        let rdv = f32x8::splat(capsule.rdv);
+        let cr = f32x8::splat(capsule.radius);
+        let zero = f32x8::ZERO;
+        let one = f32x8::splat(1.0);
+
+        for i in 0..soa.chunk_count_8() {
+            let base = i * 8;
+            let (sx, sy, sz, sr);
+            unsafe {
+                sx = f32x8::new(*xp.add(base).cast::<[f32; 8]>());
+                sy = f32x8::new(*yp.add(base).cast::<[f32; 8]>());
+                sz = f32x8::new(*zp.add(base).cast::<[f32; 8]>());
+                sr = f32x8::new(*rp.add(base).cast::<[f32; 8]>());
+            }
+
+            let dfx = sx - p1x;
+            let dfy = sy - p1y;
+            let dfz = sz - p1z;
+            let t = ((dfx * dx + dfy * dy + dfz * dz) * rdv).max(zero).min(one);
+
+            let clx = p1x + dx * t;
+            let cly = p1y + dy * t;
+            let clz = p1z + dz * t;
+
+            let ex = sx - clx;
+            let ey = sy - cly;
+            let ez = sz - clz;
+            let dist_sq = ex * ex + ey * ey + ez * ez;
+
+            let rs = sr + cr;
+            if dist_sq.simd_le(rs * rs).any() {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// True narrowphase cylinder-sphere test: one cylinder against many spheres.
+    ///
+    /// Uses the same barrel / end-cap decomposition as `sphere_vs_cylinders_broad`,
+    /// but splats cylinder state across the SIMD lanes and iterates the sphere SoA.
+    pub fn cylinder_vs_spheres_soa(cyl: &Cylinder, soa: &SpheresSoA) -> bool {
+        if soa.is_empty() {
+            return false;
+        }
+        let xp = soa.x().as_ptr();
+        let yp = soa.y().as_ptr();
+        let zp = soa.z().as_ptr();
+        let rp = soa.r().as_ptr();
+
+        let p1x = f32x8::splat(cyl.p1.x);
+        let p1y = f32x8::splat(cyl.p1.y);
+        let p1z = f32x8::splat(cyl.p1.z);
+        let dx = f32x8::splat(cyl.dir.x);
+        let dy = f32x8::splat(cyl.dir.y);
+        let dz = f32x8::splat(cyl.dir.z);
+        let rdv = f32x8::splat(cyl.rdv);
+        let cr = f32x8::splat(cyl.radius);
+        let dir_sq = f32x8::splat(cyl.dir.dot(cyl.dir));
+        let cr_sq = cr * cr;
+        let zero = f32x8::ZERO;
+        let one = f32x8::splat(1.0);
+        let four = f32x8::splat(4.0);
+
+        for i in 0..soa.chunk_count_8() {
+            let base = i * 8;
+            let (sx, sy, sz, sr);
+            unsafe {
+                sx = f32x8::new(*xp.add(base).cast::<[f32; 8]>());
+                sy = f32x8::new(*yp.add(base).cast::<[f32; 8]>());
+                sz = f32x8::new(*zp.add(base).cast::<[f32; 8]>());
+                sr = f32x8::new(*rp.add(base).cast::<[f32; 8]>());
+            }
+
+            let wx = sx - p1x;
+            let wy = sy - p1y;
+            let wz = sz - p1z;
+
+            let t = (wx * dx + wy * dy + wz * dz) * rdv;
+            let t_c = t.max(zero).min(one);
+
+            let perpx = wx - dx * t;
+            let perpy = wy - dy * t;
+            let perpz = wz - dz * t;
+            let r_sq = perpx * perpx + perpy * perpy + perpz * perpz;
+
+            let sr_sq = sr * sr;
+            let in_barrel = zero.simd_le(t) & t.simd_le(one);
+            let combined = cr + sr;
+            let barrel_hit = in_barrel & r_sq.simd_le(combined * combined);
+
+            let t_excess = t - t_c;
+            let d_axial_sq = t_excess * t_excess * dir_sq;
+
+            let inside_r = r_sq.simd_le(cr_sq);
+            let endcap_inside = inside_r & d_axial_sq.simd_le(sr_sq);
+
+            let l = r_sq + cr_sq + d_axial_sq - sr_sq;
+            let endcap_outside = l.simd_le(zero) | (l * l).simd_le(four * cr_sq * r_sq);
+
+            let not_barrel = !in_barrel;
+            let hit = barrel_hit | (not_barrel & (endcap_inside | endcap_outside));
+            if hit.any() {
+                return true;
+            }
+        }
+        false
+    }
+
     // ── Broadphase-filtered batch functions (Collider paths) ─────────────
     //
     // These read per-chunk bounding spheres from the BroadCollection's
