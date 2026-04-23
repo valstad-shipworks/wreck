@@ -203,6 +203,47 @@ fn capsule_capsule_end_separated() {
 }
 
 #[test]
+fn capsule_capsule_z_aligned_separated() {
+    let a = Capsule::new(Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 2.0), 0.5);
+    let b = Capsule::new(Vec3::new(3.0, 0.0, 0.0), Vec3::new(3.0, 0.0, 2.0), 0.5);
+    assert!(approx_eq(a.signed_distance(&b), 2.0, EPS));
+}
+
+#[test]
+fn capsule_capsule_z_aligned_z_gap() {
+    let a = Capsule::new(Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0), 0.5);
+    let b = Capsule::new(Vec3::new(0.0, 0.0, 4.0), Vec3::new(0.0, 0.0, 5.0), 0.5);
+    assert!(approx_eq(a.signed_distance(&b), 2.0, EPS));
+}
+
+#[test]
+fn capsule_capsule_z_aligned_overlap() {
+    let a = Capsule::new(Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 2.0), 0.5);
+    let b = Capsule::new(Vec3::new(0.5, 0.0, 1.0), Vec3::new(0.5, 0.0, 3.0), 0.5);
+    assert!(approx_eq(a.signed_distance(&b), -0.5, EPS));
+}
+
+#[test]
+fn capsule_capsule_batch_matches_scalar() {
+    use wreck::capsule_capsule_sdf_batch;
+    let a = vec![
+        Capsule::new(Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 2.0), 0.5),
+        Capsule::new(Vec3::new(5.0, 0.0, 0.0), Vec3::new(5.0, 0.0, 2.0), 0.3),
+        Capsule::new(Vec3::new(0.0, 5.0, 0.0), Vec3::new(2.0, 5.0, 0.0), 0.4),
+    ];
+    let b = vec![
+        Capsule::new(Vec3::new(3.0, 0.0, 0.0), Vec3::new(3.0, 0.0, 2.0), 0.5),
+        Capsule::new(Vec3::new(5.5, 0.0, 0.0), Vec3::new(5.5, 0.0, 2.0), 0.4),
+        Capsule::new(Vec3::new(0.0, 7.0, 0.0), Vec3::new(2.0, 7.0, 0.0), 0.3),
+    ];
+    let mut out = vec![0.0f32; 3];
+    capsule_capsule_sdf_batch(&a, &b, &mut out);
+    for i in 0..3 {
+        assert!(approx_eq(out[i], a[i].signed_distance(&b[i]), 1e-5));
+    }
+}
+
+#[test]
 fn capsule_capsule_crossing_perpendicular() {
     let a = Capsule::new(Vec3::new(-2.0, 0.0, 0.0), Vec3::new(2.0, 0.0, 0.0), 0.5);
     let b = Capsule::new(Vec3::new(0.0, -2.0, 0.0), Vec3::new(0.0, 2.0, 0.0), 0.5);
@@ -715,4 +756,371 @@ fn symmetry_sphere_pairs() {
     assert!(approx_eq(s.signed_distance(&cap), cap.signed_distance(&s), EPS));
     assert!(approx_eq(s.signed_distance(&plane), plane.signed_distance(&s), EPS));
     assert!(approx_eq(s.signed_distance(&p), p.signed_distance(&s), EPS));
+}
+
+// ---------------------------------------------------------------------------
+// Ray × rest
+// ---------------------------------------------------------------------------
+
+#[test]
+fn ray_point() {
+    let ray = Ray::new(Vec3::ZERO, Vec3::X);
+    let p = Point::new(5.0, 3.0, 4.0);
+    assert!(approx_eq(ray.signed_distance(&p), 5.0, EPS));
+    assert!(approx_eq(p.signed_distance(&ray), 5.0, EPS));
+}
+
+#[test]
+fn ray_point_behind_origin() {
+    let ray = Ray::new(Vec3::ZERO, Vec3::X);
+    let p = Point::new(-3.0, 4.0, 0.0);
+    assert!(approx_eq(ray.signed_distance(&p), 5.0, EPS));
+}
+
+#[test]
+fn ray_capsule_separated() {
+    let ray = Ray::new(Vec3::new(0.0, 5.0, 0.0), Vec3::X);
+    let cap = Capsule::new(Vec3::new(-1.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), 1.0);
+    assert!(approx_eq(ray.signed_distance(&cap), 4.0, EPS));
+    assert!(approx_eq(cap.signed_distance(&ray), 4.0, EPS));
+}
+
+#[test]
+fn ray_capsule_through() {
+    // Ray passes exactly through the capsule's axis segment at (0, 0.5, 0);
+    // distance from ray to segment = 0, so SDF = 0 − radius = −1.
+    let ray = Ray::new(Vec3::new(-3.0, 0.5, 0.0), Vec3::X);
+    let cap = Capsule::new(Vec3::new(0.0, -2.0, 0.0), Vec3::new(0.0, 2.0, 0.0), 1.0);
+    assert!(approx_eq(ray.signed_distance(&cap), -1.0, EPS));
+}
+
+#[test]
+fn ray_cuboid_ahead() {
+    // Ray at y=z=0 going +X passes through the cuboid interior — negative SDF.
+    let ray = Ray::new(Vec3::ZERO, Vec3::X);
+    let cube = Cuboid::from_aabb(Vec3::new(3.0, -1.0, -1.0), Vec3::new(5.0, 1.0, 1.0));
+    assert!(approx_eq(ray.signed_distance(&cube), -1.0, EPS));
+    assert!(approx_eq(cube.signed_distance(&ray), -1.0, EPS));
+}
+
+#[test]
+fn ray_cuboid_through() {
+    let ray = Ray::new(Vec3::new(-5.0, 0.0, 0.0), Vec3::X);
+    let cube = Cuboid::from_aabb(Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0));
+    assert!(approx_eq(ray.signed_distance(&cube), -1.0, EPS));
+}
+
+#[test]
+fn ray_cuboid_behind() {
+    let ray = Ray::new(Vec3::ZERO, Vec3::X);
+    let cube = Cuboid::from_aabb(Vec3::new(-5.0, -1.0, -1.0), Vec3::new(-3.0, 1.0, 1.0));
+    assert!(approx_eq(ray.signed_distance(&cube), 3.0, EPS));
+}
+
+#[test]
+fn ray_ray_skew() {
+    let a = Ray::new(Vec3::ZERO, Vec3::X);
+    let b = Ray::new(Vec3::new(0.0, 0.0, 4.0), Vec3::Y);
+    assert!(approx_eq(a.signed_distance(&b), 4.0, EPS));
+}
+
+#[test]
+fn ray_ray_parallel() {
+    let a = Ray::new(Vec3::ZERO, Vec3::X);
+    let b = Ray::new(Vec3::new(0.0, 3.0, 4.0), Vec3::X);
+    assert!(approx_eq(a.signed_distance(&b), 5.0, EPS));
+}
+
+#[test]
+fn ray_line_skew() {
+    // Ray: (1+t, 0, 0), t≥0. Line: (0, s, 3). Closest: (1,0,0)↔(0,0,3), dist=√10.
+    let r = Ray::new(Vec3::new(1.0, 0.0, 0.0), Vec3::X);
+    let l = Line::new(Vec3::new(0.0, 0.0, 3.0), Vec3::Y);
+    let expected = (10.0_f32).sqrt();
+    assert!(approx_eq(r.signed_distance(&l), expected, EPS));
+    assert!(approx_eq(l.signed_distance(&r), expected, EPS));
+}
+
+#[test]
+fn ray_segment_separated() {
+    let r = Ray::new(Vec3::ZERO, Vec3::X);
+    let s = LineSegment::new(Vec3::new(5.0, 3.0, 0.0), Vec3::new(7.0, 3.0, 0.0));
+    assert!(approx_eq(r.signed_distance(&s), 3.0, EPS));
+    assert!(approx_eq(s.signed_distance(&r), 3.0, EPS));
+}
+
+// ---------------------------------------------------------------------------
+// LineSegment × rest
+// ---------------------------------------------------------------------------
+
+#[test]
+fn segment_point() {
+    let s = LineSegment::new(Vec3::ZERO, Vec3::new(2.0, 0.0, 0.0));
+    let p = Point::new(1.0, 3.0, 4.0);
+    assert!(approx_eq(s.signed_distance(&p), 5.0, 1e-2));
+    assert!(approx_eq(p.signed_distance(&s), 5.0, 1e-2));
+}
+
+#[test]
+fn segment_capsule_perpendicular() {
+    let seg = LineSegment::new(Vec3::new(0.0, -2.0, 3.0), Vec3::new(0.0, 2.0, 3.0));
+    let cap = Capsule::new(Vec3::new(-2.0, 0.0, 0.0), Vec3::new(2.0, 0.0, 0.0), 0.5);
+    assert!(approx_eq(seg.signed_distance(&cap), 2.5, 1e-2));
+    assert!(approx_eq(cap.signed_distance(&seg), 2.5, 1e-2));
+}
+
+// ---------------------------------------------------------------------------
+// Cylinder × rest (GJK)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn cylinder_point_outside() {
+    let cyl = Cylinder::new(Vec3::new(0.0, -1.0, 0.0), Vec3::new(0.0, 1.0, 0.0), 1.0);
+    let p = Point::new(4.0, 0.0, 0.0);
+    assert!(approx_eq(cyl.signed_distance(&p), 3.0, 1e-2));
+    assert!(approx_eq(p.signed_distance(&cyl), 3.0, 1e-2));
+}
+
+#[test]
+fn cylinder_capsule_separated() {
+    let cyl = Cylinder::new(Vec3::new(0.0, -1.0, 0.0), Vec3::new(0.0, 1.0, 0.0), 1.0);
+    let cap = Capsule::new(Vec3::new(4.0, -1.0, 0.0), Vec3::new(4.0, 1.0, 0.0), 0.5);
+    assert!(approx_eq(cyl.signed_distance(&cap), 2.5, 1e-2));
+}
+
+#[test]
+fn cylinder_cuboid_separated() {
+    let cyl = Cylinder::new(Vec3::new(0.0, -1.0, 0.0), Vec3::new(0.0, 1.0, 0.0), 1.0);
+    let cube = Cuboid::from_aabb(Vec3::new(3.0, -1.0, -1.0), Vec3::new(5.0, 1.0, 1.0));
+    assert!(approx_eq(cyl.signed_distance(&cube), 2.0, 1e-2));
+    assert!(approx_eq(cube.signed_distance(&cyl), 2.0, 1e-2));
+}
+
+#[test]
+fn cylinder_segment_separated() {
+    let cyl = Cylinder::new(Vec3::new(0.0, -1.0, 0.0), Vec3::new(0.0, 1.0, 0.0), 1.0);
+    let seg = LineSegment::new(Vec3::new(4.0, -1.0, 0.0), Vec3::new(4.0, 1.0, 0.0));
+    assert!(approx_eq(cyl.signed_distance(&seg), 3.0, 1e-2));
+}
+
+// ---------------------------------------------------------------------------
+// ConvexPolytope × rest (GJK)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn polytope_point_outside() {
+    let p = unit_cube_polytope();
+    let pt = Point::new(4.0, 0.0, 0.0);
+    assert!(approx_eq(p.signed_distance(&pt), 3.0, 1e-2));
+    assert!(approx_eq(pt.signed_distance(&p), 3.0, 1e-2));
+}
+
+#[test]
+fn polytope_cylinder_separated() {
+    let p = unit_cube_polytope();
+    let cyl = Cylinder::new(Vec3::new(4.0, -1.0, 0.0), Vec3::new(4.0, 1.0, 0.0), 1.0);
+    assert!(approx_eq(p.signed_distance(&cyl), 2.0, 1e-2));
+}
+
+#[test]
+fn polytope_segment_separated() {
+    let p = unit_cube_polytope();
+    let seg = LineSegment::new(Vec3::new(4.0, 0.0, 0.0), Vec3::new(6.0, 0.0, 0.0));
+    assert!(approx_eq(p.signed_distance(&seg), 3.0, 1e-2));
+    assert!(approx_eq(seg.signed_distance(&p), 3.0, 1e-2));
+}
+
+// Note: ConvexPolytope × Line/Ray was deferred (requires bounded-segment
+// approximation for GJK on unbounded shapes) and is not part of the current
+// SDF pair matrix.
+
+// ---------------------------------------------------------------------------
+// ConvexPolygon × rest
+// ---------------------------------------------------------------------------
+
+#[test]
+fn polygon_polygon_separated() {
+    let a = unit_square_polygon();
+    let b = ConvexPolygon::with_axes(
+        Vec3::new(5.0, 0.0, 0.0),
+        Vec3::Y,
+        Vec3::X,
+        Vec3::NEG_Z,
+        vec![[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]],
+    );
+    assert!(approx_eq(a.signed_distance(&b), 3.0, 1e-2));
+}
+
+#[test]
+fn polygon_cuboid_above() {
+    let poly = unit_square_polygon();
+    let cube = Cuboid::from_aabb(Vec3::new(-1.0, 3.0, -1.0), Vec3::new(1.0, 5.0, 1.0));
+    assert!(approx_eq(poly.signed_distance(&cube), 3.0, 1e-2));
+    assert!(approx_eq(cube.signed_distance(&poly), 3.0, 1e-2));
+}
+
+#[test]
+fn polygon_capsule_above() {
+    let poly = unit_square_polygon();
+    let cap = Capsule::new(Vec3::new(-0.5, 5.0, 0.0), Vec3::new(0.5, 5.0, 0.0), 1.0);
+    assert!(approx_eq(poly.signed_distance(&cap), 4.0, 1e-2));
+}
+
+#[test]
+fn polygon_point_above() {
+    let poly = unit_square_polygon();
+    let pt = Point::new(0.0, 4.0, 0.0);
+    assert!(approx_eq(poly.signed_distance(&pt), 4.0, 1e-2));
+    assert!(approx_eq(pt.signed_distance(&poly), 4.0, 1e-2));
+}
+
+#[test]
+fn polygon_segment_above() {
+    let poly = unit_square_polygon();
+    let seg = LineSegment::new(Vec3::new(-1.0, 3.0, 0.0), Vec3::new(1.0, 3.0, 0.0));
+    assert!(approx_eq(poly.signed_distance(&seg), 3.0, 1e-2));
+}
+
+#[test]
+fn polygon_polytope_above() {
+    let poly = unit_square_polygon();
+    let cube = unit_cube_polytope();
+    // unit_cube_polytope is centered at origin (he=1), polygon is at y=0 inside.
+    // So they overlap — sdf should be negative.
+    let d = poly.signed_distance(&cube);
+    assert!(d < 0.0, "expected overlap, got {d}");
+}
+
+// ---------------------------------------------------------------------------
+// Pointcloud × rest (remaining pairs)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn pcl_point_separated() {
+    let pcl = make_cloud(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], 0.25);
+    let p = Point::new(5.0, 0.0, 0.0);
+    assert!(approx_eq(pcl.signed_distance(&p), 3.75, 1e-4));
+    assert!(approx_eq(p.signed_distance(&pcl), 3.75, 1e-4));
+}
+
+#[test]
+fn pcl_capsule_separated() {
+    let pcl = make_cloud(&[[0.0, 0.0, 0.0]], 0.25);
+    let cap = Capsule::new(Vec3::new(-1.0, 5.0, 0.0), Vec3::new(1.0, 5.0, 0.0), 1.0);
+    assert!(approx_eq(pcl.signed_distance(&cap), 3.75, 1e-3));
+}
+
+#[test]
+fn pcl_cylinder_separated() {
+    // Cloud at origin with point radius 0.25. Cylinder starts at (0, 3, 0);
+    // closest cylinder point to origin is on the bottom cap at (0, 3, 0)
+    // — 3 units away — so SDF = 3 − 0.25 = 2.75.
+    let pcl = make_cloud(&[[0.0, 0.0, 0.0]], 0.25);
+    let cyl = Cylinder::new(Vec3::new(0.0, 3.0, 0.0), Vec3::new(0.0, 5.0, 0.0), 1.0);
+    assert!(approx_eq(pcl.signed_distance(&cyl), 2.75, 1e-2));
+}
+
+#[test]
+fn pcl_polytope_separated() {
+    let pcl = make_cloud(&[[0.0, 0.0, 0.0]], 0.25);
+    let p = {
+        let planes = vec![
+            (Vec3::X, 6.0),
+            (Vec3::NEG_X, -4.0),
+            (Vec3::Y, 1.0),
+            (Vec3::NEG_Y, 1.0),
+            (Vec3::Z, 1.0),
+            (Vec3::NEG_Z, 1.0),
+        ];
+        let verts = vec![
+            Vec3::new(4.0, -1.0, -1.0),
+            Vec3::new(4.0, -1.0, 1.0),
+            Vec3::new(4.0, 1.0, -1.0),
+            Vec3::new(4.0, 1.0, 1.0),
+            Vec3::new(6.0, -1.0, -1.0),
+            Vec3::new(6.0, -1.0, 1.0),
+            Vec3::new(6.0, 1.0, -1.0),
+            Vec3::new(6.0, 1.0, 1.0),
+        ];
+        ConvexPolytope::new(planes, verts)
+    };
+    assert!(approx_eq(pcl.signed_distance(&p), 3.75, 1e-2));
+}
+
+#[test]
+fn pcl_polygon_above() {
+    let pcl = make_cloud(&[[0.0, 5.0, 0.0]], 0.25);
+    let poly = unit_square_polygon();
+    assert!(approx_eq(pcl.signed_distance(&poly), 4.75, 1e-2));
+}
+
+#[test]
+fn pcl_line_above() {
+    let pcl = make_cloud(&[[0.0, 5.0, 0.0]], 0.25);
+    let line = Line::new(Vec3::ZERO, Vec3::X);
+    assert!(approx_eq(pcl.signed_distance(&line), 4.75, 1e-3));
+}
+
+#[test]
+fn pcl_ray_separated() {
+    let pcl = make_cloud(&[[0.0, 5.0, 0.0]], 0.25);
+    let ray = Ray::new(Vec3::ZERO, Vec3::X);
+    assert!(approx_eq(pcl.signed_distance(&ray), 4.75, 1e-3));
+}
+
+#[test]
+fn pcl_segment_separated() {
+    let pcl = make_cloud(&[[0.0, 5.0, 0.0]], 0.25);
+    let seg = LineSegment::new(Vec3::ZERO, Vec3::new(2.0, 0.0, 0.0));
+    assert!(approx_eq(pcl.signed_distance(&seg), 4.75, 1e-3));
+}
+
+// ---------------------------------------------------------------------------
+// ArrayConvexPolytope × rest
+// ---------------------------------------------------------------------------
+
+#[test]
+fn array_polytope_sphere_separated() {
+    use wreck::ArrayConvexPolytope;
+    let planes = [
+        (Vec3::X, 1.0),
+        (Vec3::NEG_X, 1.0),
+        (Vec3::Y, 1.0),
+        (Vec3::NEG_Y, 1.0),
+        (Vec3::Z, 1.0),
+        (Vec3::NEG_Z, 1.0),
+    ];
+    let verts = [
+        Vec3::new(-1.0, -1.0, -1.0),
+        Vec3::new(-1.0, -1.0, 1.0),
+        Vec3::new(-1.0, 1.0, -1.0),
+        Vec3::new(-1.0, 1.0, 1.0),
+        Vec3::new(1.0, -1.0, -1.0),
+        Vec3::new(1.0, -1.0, 1.0),
+        Vec3::new(1.0, 1.0, -1.0),
+        Vec3::new(1.0, 1.0, 1.0),
+    ];
+    let obb = Cuboid::from_aabb(Vec3::splat(-1.0), Vec3::splat(1.0));
+    let p = ArrayConvexPolytope::<6, 8>::new(planes, verts, obb);
+    let s = Sphere::new(Vec3::new(5.0, 0.0, 0.0), 1.0);
+    assert!(approx_eq(p.signed_distance(&s), 3.0, 1e-2));
+    assert!(approx_eq(s.signed_distance(&p), 3.0, 1e-2));
+}
+
+// ---------------------------------------------------------------------------
+// ArrayConvexPolygon × rest
+// ---------------------------------------------------------------------------
+
+#[test]
+fn array_polygon_sphere_above() {
+    use wreck::ArrayConvexPolygon;
+    let p = ArrayConvexPolygon::<4>::new(
+        Vec3::ZERO,
+        Vec3::Y,
+        Vec3::X,
+        Vec3::NEG_Z,
+        [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]],
+    );
+    let s = Sphere::new(Vec3::new(0.0, 5.0, 0.0), 1.0);
+    assert!(approx_eq(p.signed_distance(&s), 4.0, 1e-2));
 }

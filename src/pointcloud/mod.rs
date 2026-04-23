@@ -958,16 +958,73 @@ impl SignedDistance<Pointcloud> for Sphere {
         other.signed_distance(self)
     }
 }
+
 #[cfg(feature = "sdf")]
-impl_pcl_sdf!(crate::Point);
+impl SignedDistance<crate::Point> for Pointcloud {
+    #[inline]
+    fn signed_distance(&self, other: &crate::Point) -> f32 {
+        let target = if let Some(inv) = &self.inverse_transform {
+            Vec3::from(inv.transform_point3a(glam::Vec3A::from(other.0)))
+        } else {
+            other.0
+        };
+        self.spheres.min_point_sdf(target)
+    }
+}
+#[cfg(feature = "sdf")]
+impl SignedDistance<Pointcloud> for crate::Point {
+    #[inline]
+    fn signed_distance(&self, other: &Pointcloud) -> f32 {
+        other.signed_distance(self)
+    }
+}
+
+#[cfg(feature = "sdf")]
+impl SignedDistance<Plane> for Pointcloud {
+    #[inline]
+    fn signed_distance(&self, other: &Plane) -> f32 {
+        let (n, d) = if let Some(inv) = &self.inverse_transform {
+            let mut p = *other;
+            p.transform(*inv);
+            (p.normal, p.d)
+        } else {
+            (other.normal, other.d)
+        };
+        self.spheres.min_plane_sdf(n, d)
+    }
+}
+#[cfg(feature = "sdf")]
+impl SignedDistance<Pointcloud> for Plane {
+    #[inline]
+    fn signed_distance(&self, other: &Pointcloud) -> f32 {
+        other.signed_distance(self)
+    }
+}
+
+#[cfg(feature = "sdf")]
+impl SignedDistance<Cuboid> for Pointcloud {
+    #[inline]
+    fn signed_distance(&self, other: &Cuboid) -> f32 {
+        if let Some(inv) = &self.inverse_transform {
+            let mut t = *other;
+            t.transform(*inv);
+            self.spheres.min_cuboid_sdf(&t)
+        } else {
+            self.spheres.min_cuboid_sdf(other)
+        }
+    }
+}
+#[cfg(feature = "sdf")]
+impl SignedDistance<Pointcloud> for Cuboid {
+    #[inline]
+    fn signed_distance(&self, other: &Pointcloud) -> f32 {
+        other.signed_distance(self)
+    }
+}
 #[cfg(feature = "sdf")]
 impl_pcl_sdf!(Capsule);
 #[cfg(feature = "sdf")]
-impl_pcl_sdf!(Cuboid);
-#[cfg(feature = "sdf")]
 impl_pcl_sdf!(Cylinder);
-#[cfg(feature = "sdf")]
-impl_pcl_sdf!(Plane);
 #[cfg(feature = "sdf")]
 impl_pcl_sdf!(ConvexPolygon);
 #[cfg(feature = "sdf")]

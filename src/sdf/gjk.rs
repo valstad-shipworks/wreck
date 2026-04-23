@@ -7,10 +7,19 @@ use glam::Vec3;
 use super::support::SupportFn;
 
 /// Hard cap on GJK iterations. In practice GJK converges in under ~20 on
-/// well-conditioned shapes; the cap guards against pathological inputs.
-const GJK_MAX_ITERATIONS: usize = 64;
+/// well-conditioned shapes; the cap guards against pathological inputs
+/// (smooth curved Minkowski differences that converge 1/iter^N rather than
+/// exponentially — capsule pairs being the worst case).
+const GJK_MAX_ITERATIONS: usize = 32;
 
-/// Convergence tolerance on the squared distance improvement per iteration.
+/// Convergence tolerance on relative distance improvement. 1e-6 stops GJK
+/// from oscillating on curved-vs-curved shape pairs without sacrificing
+/// useful precision.
+const GJK_TERM_EPS: f32 = 1e-6;
+
+/// Tight tolerance for "origin is inside the simplex" detection. Must stay
+/// tight (1e-10) — loosening it causes GJK to report near-touching shapes as
+/// interpenetrating and hand them to EPA, which is slower and less accurate.
 const GJK_EPS: f32 = 1e-10;
 
 /// A Minkowski-difference vertex together with the support pair that produced
@@ -60,14 +69,21 @@ where
     let mut direction = -simplex[0].w;
 
     for _ in 0..GJK_MAX_ITERATIONS {
-        if direction.dot(direction) < GJK_EPS {
+        let dir_len_sq = direction.dot(direction);
+        if dir_len_sq < GJK_EPS {
             return produce_enclosure(a, b, &mut simplex, &mut n);
         }
 
         let w = SupportVertex::new(a, b, direction);
 
-        let dir_len_sq = direction.dot(direction);
-        if direction.dot(w.w) < direction.dot(simplex[0].w) + GJK_EPS * dir_len_sq.sqrt() {
+        // Standard GJK termination: with closest = -direction, the current
+        // best distance estimate is |direction|. The new support `w` only
+        // improves the estimate if `direction.dot(w)` exceeds
+        // `direction.dot(closest) = -|direction|²`. Stop when the improvement
+        // is below tolerance — scale by |direction| so the test is in the
+        // same units as the distance estimate.
+        let improvement = direction.dot(w.w) + dir_len_sq;
+        if improvement <= GJK_TERM_EPS * dir_len_sq.sqrt() {
             break;
         }
 

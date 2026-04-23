@@ -437,6 +437,165 @@ impl SpheresSoA {
         any_hit
     }
 
+    /// SIMD-accelerated minimum signed distance from the SoA to a point.
+    #[cfg(feature = "sdf")]
+    #[inline]
+    pub fn min_point_sdf(&self, point: glam::Vec3) -> f32 {
+        #[cfg(not(feature = "std"))]
+        #[allow(unused_imports)]
+        use crate::F32Ext;
+
+        if self.is_empty() {
+            return f32::INFINITY;
+        }
+        let tx = f32x8::splat(point.x);
+        let ty = f32x8::splat(point.y);
+        let tz = f32x8::splat(point.z);
+
+        let full_chunks = self.len / 8;
+        let xp = self.x().as_ptr();
+        let yp = self.y().as_ptr();
+        let zp = self.z().as_ptr();
+        let rp = self.r().as_ptr();
+
+        let mut min_vec = f32x8::splat(f32::INFINITY);
+        for i in 0..full_chunks {
+            let base = i * 8;
+            let (ox, oy, oz, or);
+            unsafe {
+                ox = f32x8::new(*xp.add(base).cast::<[f32; 8]>());
+                oy = f32x8::new(*yp.add(base).cast::<[f32; 8]>());
+                oz = f32x8::new(*zp.add(base).cast::<[f32; 8]>());
+                or = f32x8::new(*rp.add(base).cast::<[f32; 8]>());
+            }
+            let dx = ox - tx;
+            let dy = oy - ty;
+            let dz = oz - tz;
+            let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+            min_vec = min_vec.min(dist - or);
+        }
+        let arr = min_vec.to_array();
+        let mut best = arr[0];
+        for &v in &arr[1..] {
+            if v < best {
+                best = v;
+            }
+        }
+        let xs = self.x();
+        let ys = self.y();
+        let zs = self.z();
+        let rs = self.r();
+        for i in (full_chunks * 8)..self.len {
+            let dx = xs[i] - point.x;
+            let dy = ys[i] - point.y;
+            let dz = zs[i] - point.z;
+            let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+            let sdf = dist - rs[i];
+            if sdf < best {
+                best = sdf;
+            }
+        }
+        best
+    }
+
+    /// SIMD-accelerated minimum signed distance from the SoA to a half-space
+    /// `n·x ≤ d`.
+    #[cfg(feature = "sdf")]
+    #[inline]
+    pub fn min_plane_sdf(&self, normal: glam::Vec3, d: f32) -> f32 {
+        if self.is_empty() {
+            return f32::INFINITY;
+        }
+        let nx = f32x8::splat(normal.x);
+        let ny = f32x8::splat(normal.y);
+        let nz = f32x8::splat(normal.z);
+        let dv = f32x8::splat(d);
+
+        let full_chunks = self.len / 8;
+        let xp = self.x().as_ptr();
+        let yp = self.y().as_ptr();
+        let zp = self.z().as_ptr();
+        let rp = self.r().as_ptr();
+
+        let mut min_vec = f32x8::splat(f32::INFINITY);
+        for i in 0..full_chunks {
+            let base = i * 8;
+            let (ox, oy, oz, or);
+            unsafe {
+                ox = f32x8::new(*xp.add(base).cast::<[f32; 8]>());
+                oy = f32x8::new(*yp.add(base).cast::<[f32; 8]>());
+                oz = f32x8::new(*zp.add(base).cast::<[f32; 8]>());
+                or = f32x8::new(*rp.add(base).cast::<[f32; 8]>());
+            }
+            let proj = nx * ox + ny * oy + nz * oz - dv - or;
+            min_vec = min_vec.min(proj);
+        }
+        let arr = min_vec.to_array();
+        let mut best = arr[0];
+        for &v in &arr[1..] {
+            if v < best {
+                best = v;
+            }
+        }
+        let xs = self.x();
+        let ys = self.y();
+        let zs = self.z();
+        let rs = self.r();
+        for i in (full_chunks * 8)..self.len {
+            let proj = normal.x * xs[i] + normal.y * ys[i] + normal.z * zs[i] - d - rs[i];
+            if proj < best {
+                best = proj;
+            }
+        }
+        best
+    }
+
+    /// SIMD-accelerated minimum signed distance from the SoA to a cuboid.
+    #[cfg(feature = "sdf")]
+    #[inline]
+    pub fn min_cuboid_sdf(&self, cuboid: &crate::Cuboid) -> f32 {
+        if self.is_empty() {
+            return f32::INFINITY;
+        }
+        let full_chunks = self.len / 8;
+        let xp = self.x().as_ptr();
+        let yp = self.y().as_ptr();
+        let zp = self.z().as_ptr();
+        let rp = self.r().as_ptr();
+
+        let mut min_vec = f32x8::splat(f32::INFINITY);
+        for i in 0..full_chunks {
+            let base = i * 8;
+            let (ox, oy, oz, or);
+            unsafe {
+                ox = f32x8::new(*xp.add(base).cast::<[f32; 8]>());
+                oy = f32x8::new(*yp.add(base).cast::<[f32; 8]>());
+                oz = f32x8::new(*zp.add(base).cast::<[f32; 8]>());
+                or = f32x8::new(*rp.add(base).cast::<[f32; 8]>());
+            }
+            let sd = cuboid.point_signed_distance_x8(ox, oy, oz) - or;
+            min_vec = min_vec.min(sd);
+        }
+        let arr = min_vec.to_array();
+        let mut best = arr[0];
+        for &v in &arr[1..] {
+            if v < best {
+                best = v;
+            }
+        }
+        let xs = self.x();
+        let ys = self.y();
+        let zs = self.z();
+        let rs = self.r();
+        for i in (full_chunks * 8)..self.len {
+            let sd = cuboid.point_signed_distance(glam::Vec3::new(xs[i], ys[i], zs[i])) - rs[i];
+            if sd < best {
+                best = sd;
+            }
+        }
+        best
+    }
+
     /// SIMD-accelerated minimum signed distance between the SoA and a single
     /// target sphere. Uses f32x8 lanes for the bulk of centers+radii, with a
     /// scalar tail for the partial last chunk (padded lanes carry NaN radii

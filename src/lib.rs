@@ -51,6 +51,9 @@ pub use sphere::Sphere;
 #[cfg(feature = "sdf")]
 pub use sdf::SignedDistance;
 
+#[cfg(feature = "sdf")]
+pub use capsule::capsule_capsule_sdf_batch;
+
 pub use crate::pointcloud::NoPcl;
 use crate::pointcloud::PointCloudMarker;
 

@@ -470,7 +470,7 @@ pub(crate) fn parametric_cuboid_signed_distance(
     // us evaluate them in 3 f32x8 SIMD batches without any per-lane branches.
     let mut ts = [f32::NAN; 24];
     let mut n = 0usize;
-    let mut push = |t: f32, n: &mut usize, ts: &mut [f32; 24]| {
+    let push = |t: f32, n: &mut usize, ts: &mut [f32; 24]| {
         if t > t_min && t < t_max {
             ts[*n] = t;
             *n += 1;

@@ -217,11 +217,16 @@ pub(crate) fn parametric_pair_dist_sq(
     let eps = f32::EPSILON;
 
     let denom = a * e - b * b;
+    let dist_at = |s: f32, t: f32| -> f32 {
+        let diff = (o1 + d1 * s) - (o2 + d2 * t);
+        diff.dot(diff)
+    };
 
-    let (s, t) = if denom.abs() > eps && a > eps && e > eps {
+    if denom.abs() > eps && a > eps && e > eps {
+        // General case: non-parallel, both directions nonzero.
         let s0 = ((b * f - c * e) / denom).clamp(s_min, s_max);
         let mut t0 = (b * s0 + f) / e;
-        if t0 < t_min {
+        let (s, t) = if t0 < t_min {
             let t1 = t_min;
             let s1 = ((b * t1 - c) / a).clamp(s_min, s_max);
             (s1, t1)
@@ -232,24 +237,56 @@ pub(crate) fn parametric_pair_dist_sq(
         } else {
             t0 = t0.clamp(t_min, t_max);
             (s0, t0)
-        }
-    } else if a > eps {
-        let t1 = (0.0f32).clamp(t_min, t_max);
-        let s1 = ((b * t1 - c) / a).clamp(s_min, s_max);
-        (s1, t1)
-    } else if e > eps {
-        let s1 = (0.0f32).clamp(s_min, s_max);
-        let t1 = ((b * s1 + f) / e).clamp(t_min, t_max);
-        (s1, t1)
-    } else {
-        (
-            (0.0f32).clamp(s_min, s_max),
-            (0.0f32).clamp(t_min, t_max),
-        )
-    };
+        };
+        return dist_at(s, t);
+    }
 
-    let diff = (o1 + d1 * s) - (o2 + d2 * t);
-    diff.dot(diff)
+    if a <= eps && e <= eps {
+        return dist_at(s_min.max(0.0).min(s_max), t_min.max(0.0).min(t_max));
+    }
+
+    // Parallel (or one direction zero). For parallel infinite lines the
+    // distance is constant perpendicular along the pair; for bounded ranges
+    // we additionally need to check each endpoint's projection onto the
+    // other curve. Minimum over: (1) one interior perpendicular foot if both
+    // curves extend through the projection, (2) each finite endpoint
+    // projected onto the other curve (clamped).
+    let mut best = f32::INFINITY;
+
+    let clamp_zero = |x: f32, lo: f32, hi: f32| x.max(lo).min(hi);
+
+    // (1) Interior foot at s=0, t = foot of o1 on line 2 (clamped).
+    if a > eps || e > eps {
+        let t0 = if e > eps { f / e } else { 0.0 };
+        let t = clamp_zero(t0, t_min, t_max);
+        let s0 = if a > eps { (b * t - c) / a } else { 0.0 };
+        let s = clamp_zero(s0, s_min, s_max);
+        best = best.min(dist_at(s, t));
+    }
+
+    for &s_end in [s_min, s_max].iter() {
+        if !s_end.is_finite() {
+            continue;
+        }
+        let t = if e > eps {
+            clamp_zero((b * s_end + f) / e, t_min, t_max)
+        } else {
+            clamp_zero(0.0, t_min, t_max)
+        };
+        best = best.min(dist_at(s_end, t));
+    }
+    for &t_end in [t_min, t_max].iter() {
+        if !t_end.is_finite() {
+            continue;
+        }
+        let s = if a > eps {
+            clamp_zero((b * t_end - c) / a, s_min, s_max)
+        } else {
+            clamp_zero(0.0, s_min, s_max)
+        };
+        best = best.min(dist_at(s, t_end));
+    }
+    if best.is_finite() { best } else { dist_at(0.0, 0.0) }
 }
 
 // ---------------------------------------------------------------------------
