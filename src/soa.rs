@@ -65,7 +65,11 @@ impl<'de> serde::Deserialize<'de> for SpheresSoA {
         buf.extend_from_slice(&h.y);
         buf.extend_from_slice(&h.z);
         buf.extend_from_slice(&h.r);
-        Ok(Self { buf, padded, len: h.len })
+        Ok(Self {
+            buf,
+            padded,
+            len: h.len,
+        })
     }
 }
 
@@ -229,10 +233,12 @@ impl SpheresSoA {
         buf[new_padded + sl..new_padded + sl + ol].copy_from_slice(&other.buf[op..op + ol]);
 
         buf[2 * new_padded..2 * new_padded + sl].copy_from_slice(&self.buf[2 * sp..2 * sp + sl]);
-        buf[2 * new_padded + sl..2 * new_padded + sl + ol].copy_from_slice(&other.buf[2 * op..2 * op + ol]);
+        buf[2 * new_padded + sl..2 * new_padded + sl + ol]
+            .copy_from_slice(&other.buf[2 * op..2 * op + ol]);
 
         buf[3 * new_padded..3 * new_padded + sl].copy_from_slice(&self.buf[3 * sp..3 * sp + sl]);
-        buf[3 * new_padded + sl..3 * new_padded + sl + ol].copy_from_slice(&other.buf[3 * op..3 * op + ol]);
+        buf[3 * new_padded + sl..3 * new_padded + sl + ol]
+            .copy_from_slice(&other.buf[3 * op..3 * op + ol]);
 
         for i in new_len..new_padded {
             buf[3 * new_padded + i] = f32::NAN;
@@ -264,10 +270,12 @@ impl SpheresSoA {
         buf[new_padded + sl..new_padded + sl + ol].copy_from_slice(&other.buf[op..op + ol]);
 
         buf[2 * new_padded..2 * new_padded + sl].copy_from_slice(&self.buf[2 * sp..2 * sp + sl]);
-        buf[2 * new_padded + sl..2 * new_padded + sl + ol].copy_from_slice(&other.buf[2 * op..2 * op + ol]);
+        buf[2 * new_padded + sl..2 * new_padded + sl + ol]
+            .copy_from_slice(&other.buf[2 * op..2 * op + ol]);
 
         buf[3 * new_padded..3 * new_padded + sl].copy_from_slice(&self.buf[3 * sp..3 * sp + sl]);
-        buf[3 * new_padded + sl..3 * new_padded + sl + ol].copy_from_slice(&other.buf[3 * op..3 * op + ol]);
+        buf[3 * new_padded + sl..3 * new_padded + sl + ol]
+            .copy_from_slice(&other.buf[3 * op..3 * op + ol]);
 
         for i in new_len..new_padded {
             buf[3 * new_padded + i] = f32::NAN;
@@ -286,12 +294,25 @@ impl SpheresSoA {
         self.len = 0;
     }
 
+    /// Replaces the contents of `self` with those of `other`, reusing the
+    /// existing allocation when the current capacity permits.
+    #[inline]
+    pub fn clone_from(&mut self, other: &Self) {
+        self.buf.clone_from(&other.buf);
+        self.padded = other.padded;
+        self.len = other.len;
+    }
+
     #[inline]
     pub fn get(&self, index: usize) -> Sphere {
         debug_assert!(index < self.len);
         let p = self.padded;
         Sphere::new(
-            Vec3::new(self.buf[index], self.buf[p + index], self.buf[2 * p + index]),
+            Vec3::new(
+                self.buf[index],
+                self.buf[p + index],
+                self.buf[2 * p + index],
+            ),
             self.buf[3 * p + index],
         )
     }
@@ -326,7 +347,10 @@ impl SpheresSoA {
         }
     }
 
-    #[cfg_attr(all(target_arch = "x86_64", target_feature = "avx512f"), allow(dead_code))]
+    #[cfg_attr(
+        all(target_arch = "x86_64", target_feature = "avx512f"),
+        allow(dead_code)
+    )]
     fn any_collides_sphere_f32x8(&self, sphere: &Sphere) -> bool {
         let cx = f32x8::splat(sphere.center.x);
         let cy = f32x8::splat(sphere.center.y);
@@ -397,7 +421,10 @@ impl SpheresSoA {
         }
     }
 
-    #[cfg_attr(all(target_arch = "x86_64", target_feature = "avx512f"), allow(dead_code))]
+    #[cfg_attr(
+        all(target_arch = "x86_64", target_feature = "avx512f"),
+        allow(dead_code)
+    )]
     fn broadphase_collect_f32x8(&self, query: &Sphere, out: &mut [bool]) -> bool {
         let cx = f32x8::splat(query.center.x);
         let cy = f32x8::splat(query.center.y);
@@ -460,7 +487,10 @@ impl SpheresSoA {
         }
     }
 
-    #[cfg_attr(all(target_arch = "x86_64", target_feature = "avx512f"), allow(dead_code))]
+    #[cfg_attr(
+        all(target_arch = "x86_64", target_feature = "avx512f"),
+        allow(dead_code)
+    )]
     fn any_collides_soa_f32x8(&self, other: &SpheresSoA) -> bool {
         let other_chunks = other.chunk_count_8();
         let oxp = other.x().as_ptr();
@@ -567,7 +597,10 @@ impl Transformable for SpheresSoA {
 }
 
 impl SpheresSoA {
-    #[cfg_attr(all(target_arch = "x86_64", target_feature = "avx512f"), allow(dead_code))]
+    #[cfg_attr(
+        all(target_arch = "x86_64", target_feature = "avx512f"),
+        allow(dead_code)
+    )]
     fn translate_f32x8(&mut self, offset: Vec3) {
         let ox = f32x8::splat(offset.x);
         let oy = f32x8::splat(offset.y);
@@ -591,7 +624,10 @@ impl SpheresSoA {
         }
     }
 
-    #[cfg_attr(all(target_arch = "x86_64", target_feature = "avx512f"), allow(dead_code))]
+    #[cfg_attr(
+        all(target_arch = "x86_64", target_feature = "avx512f"),
+        allow(dead_code)
+    )]
     fn rotate_mat_f32x8(&mut self, mat: glam::Mat3) {
         let m00 = f32x8::splat(mat.x_axis.x);
         let m01 = f32x8::splat(mat.y_axis.x);
@@ -624,7 +660,10 @@ impl SpheresSoA {
         }
     }
 
-    #[cfg_attr(all(target_arch = "x86_64", target_feature = "avx512f"), allow(dead_code))]
+    #[cfg_attr(
+        all(target_arch = "x86_64", target_feature = "avx512f"),
+        allow(dead_code)
+    )]
     fn transform_f32x8(&mut self, mat: glam::Affine3A) {
         let rot = mat.matrix3;
         let m00 = f32x8::splat(rot.x_axis.x);
@@ -682,7 +721,10 @@ impl Scalable for SpheresSoA {
 }
 
 impl SpheresSoA {
-    #[cfg_attr(all(target_arch = "x86_64", target_feature = "avx512f"), allow(dead_code))]
+    #[cfg_attr(
+        all(target_arch = "x86_64", target_feature = "avx512f"),
+        allow(dead_code)
+    )]
     fn scale_f32x8(&mut self, factor: f32) {
         let f = f32x8::splat(factor);
         let chunks = self.chunk_count_8();
@@ -708,8 +750,8 @@ impl SpheresSoA {
 mod avx512 {
     use super::SpheresSoA;
     use crate::Sphere;
-    use glam::Vec3;
     use core::arch::x86_64::*;
+    use glam::Vec3;
 
     #[inline]
     fn chunk_count_16(soa: &SpheresSoA) -> usize {
@@ -1028,6 +1070,14 @@ where
         self.broad.append(&mut other.broad);
     }
 
+    /// Replaces the contents of `self` with those of `other`, reusing the
+    /// existing allocations when capacity allows.
+    #[inline]
+    pub fn clone_from(&mut self, other: &Self) {
+        self.items.clone_from(&other.items);
+        self.broad.clone_from(&other.broad);
+    }
+
     #[inline]
     pub fn len(&self) -> usize {
         self.items.len()
@@ -1178,11 +1228,11 @@ where
 }
 
 pub(crate) mod batch {
-    use glam::Vec3;
-    use wide::{CmpLe, f32x8};
     #[cfg(not(feature = "std"))]
     #[allow(unused_imports)]
     use crate::F32Ext;
+    use glam::Vec3;
+    use wide::{CmpLe, f32x8};
 
     use super::{BroadCollection, SpheresSoA};
     use crate::Collides;
@@ -1500,8 +1550,14 @@ pub(crate) mod batch {
 
     #[inline]
     fn broad_sphere_overlaps_chunk(
-        cx: f32x8, cy: f32x8, cz: f32x8, sr: f32x8,
-        bxp: *const f32, byp: *const f32, bzp: *const f32, brp: *const f32,
+        cx: f32x8,
+        cy: f32x8,
+        cz: f32x8,
+        sr: f32x8,
+        bxp: *const f32,
+        byp: *const f32,
+        bzp: *const f32,
+        brp: *const f32,
         base: usize,
     ) -> bool {
         let (bx, by, bz, br);
@@ -1521,8 +1577,14 @@ pub(crate) mod batch {
 
     #[inline]
     fn broad_plane_overlaps_chunk(
-        nx: f32x8, ny: f32x8, nz: f32x8, d: f32x8,
-        bxp: *const f32, byp: *const f32, bzp: *const f32, brp: *const f32,
+        nx: f32x8,
+        ny: f32x8,
+        nz: f32x8,
+        d: f32x8,
+        bxp: *const f32,
+        byp: *const f32,
+        bzp: *const f32,
+        brp: *const f32,
         base: usize,
     ) -> bool {
         let (bx, by, bz, br);
