@@ -28,6 +28,9 @@ pub(crate) mod serde_arrays;
 #[cfg(feature = "quote")]
 mod quote;
 
+#[cfg(feature = "valuable")]
+mod valuable_impls;
+
 pub mod soa;
 
 pub use capsule::Capsule;

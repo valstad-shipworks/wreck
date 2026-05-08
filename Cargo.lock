@@ -264,6 +264,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "glam-traits-ext"
+version = "0.32.3"
+dependencies = [
+ "glam",
+ "num-traits",
+ "valuable",
+]
+
+[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -605,6 +614,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
+name = "valuable"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
+
+[[package]]
 name = "walkdir"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -749,6 +764,7 @@ dependencies = [
  "cfg-if",
  "criterion",
  "glam",
+ "glam-traits-ext",
  "inherent",
  "libm",
  "proc-macro2",
@@ -756,6 +772,7 @@ dependencies = [
  "rand",
  "serde",
  "static_assertions",
+ "valuable",
  "wide",
 ]
 
