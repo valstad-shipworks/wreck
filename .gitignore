@@ -1,4 +1,2 @@
 /target
 .claude
-Cargo.lock
-*.lock
