@@ -2,11 +2,9 @@ pub(crate) mod line;
 pub(crate) mod ray;
 pub(crate) mod segment;
 
-pub use line::Line;
 pub use line::LineStretch;
-pub use ray::Ray;
 pub use ray::RayStretch;
-pub use segment::LineSegment;
+pub use squiggle::{Line, LineSegment, Ray};
 pub use segment::LineSegmentStretch;
 
 use glam::Vec3;
@@ -15,6 +13,14 @@ use crate::capsule::Capsule;
 use crate::cuboid::Cuboid;
 use crate::plane::Plane;
 use crate::sphere::Sphere;
+
+/// Reciprocal of `dot(dir, dir)`, or `0` for a degenerate direction. squiggle's line
+/// types don't cache this, so collision code recomputes it per query.
+#[inline]
+pub(crate) fn rdv(dir: Vec3) -> f32 {
+    let len_sq = dir.dot(dir);
+    if len_sq > f32::EPSILON { 1.0 / len_sq } else { 0.0 }
+}
 
 // ---------------------------------------------------------------------------
 // Shared helpers for parametric line collision (t ∈ [t_min, t_max])

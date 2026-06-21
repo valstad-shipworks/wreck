@@ -1,13 +1,11 @@
 use alloc::vec::Vec;
-use core::fmt;
 
 use glam::Vec3;
-
-use inherent::inherent;
 
 use crate::capsule::Capsule;
 use crate::convex_polytope::array::ArrayConvexPolytope;
 use crate::cuboid::Cuboid;
+use crate::line::{LineSegment, rdv};
 use crate::plane::{ConvexPolygon, Plane};
 use crate::sphere::Sphere;
 use crate::{Bounded, Collides, ConvexPolytope, Scalable, Stretchable, Transformable};
@@ -15,107 +13,57 @@ use crate::{Bounded, Collides, ConvexPolytope, Scalable, Stretchable, Transforma
 const T_MIN: f32 = 0.0;
 const T_MAX: f32 = 1.0;
 
-/// A line segment from `p1` to `p1 + dir`.
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct LineSegment {
-    pub p1: Vec3,
-    pub dir: Vec3,
-    pub(crate) rdv: f32,
-}
-
-impl LineSegment {
-    pub fn new(p1: Vec3, p2: Vec3) -> Self {
-        let dir = p2 - p1;
-        let len_sq = dir.dot(dir);
-        Self {
-            p1,
-            dir,
-            rdv: if len_sq > f32::EPSILON {
-                1.0 / len_sq
-            } else {
-                0.0
-            },
-        }
-    }
-
-    #[inline]
-    pub fn p2(&self) -> Vec3 {
-        self.p1 + self.dir
-    }
-
-    #[inline]
-    pub fn bounding_sphere(&self) -> (Vec3, f32) {
-        let center = self.p1 + 0.5 * self.dir;
-        let half_len = self.dir.length() * 0.5;
-        (center, half_len)
-    }
-}
-
-#[inherent]
 impl Bounded for LineSegment {
-    pub fn broadphase(&self) -> Sphere {
-        let (center, radius) = self.bounding_sphere();
+    fn broadphase(&self) -> Sphere {
+        let center = self.midpoint();
+        let radius = (self.end - self.start).length() * 0.5;
         Sphere::new(center, radius)
     }
 
-    pub fn obb(&self) -> Cuboid {
-        let center = self.p1 + 0.5 * self.dir;
-        let len = self.dir.length();
+    fn obb(&self) -> Cuboid {
+        let dir = self.dir();
+        let center = self.midpoint();
+        let len = dir.length();
         if len < f32::EPSILON {
-            return Cuboid::from_aabb(self.p1, self.p1);
+            return Cuboid::from_aabb(self.start, self.start);
         }
-        let ax0 = self.dir / len;
+        let ax0 = dir / len;
         let ref_vec = if ax0.x.abs() < 0.9 { Vec3::X } else { Vec3::Y };
         let ax1 = ax0.cross(ref_vec).normalize();
         let ax2 = ax0.cross(ax1);
         Cuboid::new(center, [ax0, ax1, ax2], [len * 0.5, 0.0, 0.0])
     }
 
-    pub fn aabb(&self) -> Cuboid {
-        let p2 = self.p1 + self.dir;
-        Cuboid::from_aabb(self.p1.min(p2), self.p1.max(p2))
+    fn aabb(&self) -> Cuboid {
+        Cuboid::from_aabb(self.start.min(self.end), self.start.max(self.end))
     }
 }
 
-#[inherent]
 impl Scalable for LineSegment {
-    pub fn scale(&mut self, factor: f32) {
-        self.dir *= factor;
-        let len_sq = self.dir.dot(self.dir);
-        self.rdv = if len_sq > f32::EPSILON {
-            1.0 / len_sq
-        } else {
-            0.0
-        };
+    fn scale(&mut self, factor: f32) {
+        self.end = self.start + self.dir() * factor;
     }
 }
 
-#[inherent]
 impl Transformable for LineSegment {
-    pub fn translate(&mut self, offset: glam::Vec3A) {
-        self.p1 = Vec3::from(glam::Vec3A::from(self.p1) + offset);
+    fn translate(&mut self, offset: glam::Vec3A) {
+        self.start = Vec3::from(glam::Vec3A::from(self.start) + offset);
+        self.end = Vec3::from(glam::Vec3A::from(self.end) + offset);
     }
 
-    pub fn rotate_mat(&mut self, mat: glam::Mat3A) {
-        self.p1 = Vec3::from(mat * glam::Vec3A::from(self.p1));
-        self.dir = Vec3::from(mat * glam::Vec3A::from(self.dir));
+    fn rotate_mat(&mut self, mat: glam::Mat3A) {
+        self.start = Vec3::from(mat * glam::Vec3A::from(self.start));
+        self.end = Vec3::from(mat * glam::Vec3A::from(self.end));
     }
 
-    pub fn rotate_quat(&mut self, quat: glam::Quat) {
-        self.p1 = quat * self.p1;
-        self.dir = quat * self.dir;
+    fn rotate_quat(&mut self, quat: glam::Quat) {
+        self.start = quat * self.start;
+        self.end = quat * self.end;
     }
 
-    pub fn transform(&mut self, mat: glam::Affine3A) {
-        self.p1 = Vec3::from(mat.transform_point3a(glam::Vec3A::from(self.p1)));
-        self.dir = Vec3::from(mat.matrix3 * glam::Vec3A::from(self.dir));
-        let len_sq = self.dir.dot(self.dir);
-        self.rdv = if len_sq > f32::EPSILON {
-            1.0 / len_sq
-        } else {
-            0.0
-        };
+    fn transform(&mut self, mat: glam::Affine3A) {
+        self.start = Vec3::from(mat.transform_point3a(glam::Vec3A::from(self.start)));
+        self.end = Vec3::from(mat.transform_point3a(glam::Vec3A::from(self.end)));
     }
 }
 
@@ -132,14 +80,16 @@ impl Stretchable for LineSegment {
     type Output = LineSegmentStretch;
 
     fn stretch(&self, translation: Vec3) -> Self::Output {
-        let cross = self.dir.cross(translation);
+        let p1 = self.start;
+        let dir = self.dir();
+        let cross = dir.cross(translation);
         if cross.length_squared() < 1e-10 {
             // Parallel: extend the segment
-            let proj = translation.dot(self.dir);
+            let proj = translation.dot(dir);
             let (new_p1, new_p2) = if proj >= 0.0 {
-                (self.p1, self.p1 + self.dir + translation)
+                (p1, p1 + dir + translation)
             } else {
-                (self.p1 + translation, self.p1 + self.dir)
+                (p1 + translation, p1 + dir)
             };
             return LineSegmentStretch::Parallel(LineSegment::new(new_p1, new_p2));
         }
@@ -154,12 +104,12 @@ impl Stretchable for LineSegment {
         let u_axis = normal.cross(up).normalize();
         let v_axis = u_axis.cross(normal);
 
-        let center = self.p1 + (self.dir + translation) * 0.5;
+        let center = p1 + (dir + translation) * 0.5;
         let corners = [
-            self.p1,
-            self.p1 + self.dir,
-            self.p1 + self.dir + translation,
-            self.p1 + translation,
+            p1,
+            p1 + dir,
+            p1 + dir + translation,
+            p1 + translation,
         ];
 
         let verts_2d: Vec<[f32; 2]> = corners
@@ -180,7 +130,8 @@ impl Stretchable for LineSegment {
 
 #[inline]
 fn segment_sphere_collides(seg: &LineSegment, sphere: &Sphere) -> bool {
-    super::line_sphere_collides(seg.p1, seg.dir, seg.rdv, sphere, T_MIN, T_MAX)
+    let dir = seg.dir();
+    super::line_sphere_collides(seg.start, dir, rdv(dir), sphere, T_MIN, T_MAX)
 }
 
 impl Collides<Sphere> for LineSegment {
@@ -202,7 +153,7 @@ impl Collides<LineSegment> for Sphere {
 impl Collides<Capsule> for LineSegment {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, capsule: &Capsule) -> bool {
-        super::line_capsule_collides(self.p1, self.dir, capsule, T_MIN, T_MAX)
+        super::line_capsule_collides(self.start, self.dir(), capsule, T_MIN, T_MAX)
     }
 }
 
@@ -218,7 +169,7 @@ impl Collides<LineSegment> for Capsule {
 impl Collides<Cuboid> for LineSegment {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, cuboid: &Cuboid) -> bool {
-        super::line_cuboid_collides(self.p1, self.dir, cuboid, T_MIN, T_MAX)
+        super::line_cuboid_collides(self.start, self.dir(), cuboid, T_MIN, T_MAX)
     }
 }
 
@@ -235,8 +186,8 @@ impl Collides<ConvexPolytope> for LineSegment {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, polytope: &ConvexPolytope) -> bool {
         super::line_polytope_collides(
-            self.p1,
-            self.dir,
+            self.start,
+            self.dir(),
             &polytope.planes,
             &polytope.obb,
             T_MIN,
@@ -256,8 +207,8 @@ impl<const P: usize, const V: usize> Collides<ArrayConvexPolytope<P, V>> for Lin
     #[inline]
     fn test<const BROADPHASE: bool>(&self, polytope: &ArrayConvexPolytope<P, V>) -> bool {
         super::line_polytope_collides(
-            self.p1,
-            self.dir,
+            self.start,
+            self.dir(),
             &polytope.planes,
             &polytope.obb,
             T_MIN,
@@ -278,7 +229,7 @@ impl<const P: usize, const V: usize> Collides<LineSegment> for ArrayConvexPolyto
 impl Collides<Plane> for LineSegment {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, plane: &Plane) -> bool {
-        super::line_infinite_plane_collides(self.p1, self.dir, plane, T_MIN, T_MAX)
+        super::line_infinite_plane_collides(self.start, self.dir(), plane, T_MIN, T_MAX)
     }
 }
 
@@ -294,7 +245,7 @@ impl Collides<LineSegment> for Plane {
 impl Collides<ConvexPolygon> for LineSegment {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, polygon: &ConvexPolygon) -> bool {
-        polygon.parametric_line_dist_sq(self.p1, self.dir, T_MIN, T_MAX) <= 0.0
+        polygon.parametric_line_dist_sq(self.start, self.dir(), T_MIN, T_MAX) <= 0.0
     }
 }
 
@@ -302,17 +253,5 @@ impl Collides<LineSegment> for ConvexPolygon {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, seg: &LineSegment) -> bool {
         seg.test::<BROADPHASE>(self)
-    }
-}
-
-impl fmt::Display for LineSegment {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let p1 = self.p1;
-        let p2 = self.p2();
-        write!(
-            f,
-            "LineSegment(p1: [{}, {}, {}], p2: [{}, {}, {}])",
-            p1.x, p1.y, p1.z, p2.x, p2.y, p2.z
-        )
     }
 }

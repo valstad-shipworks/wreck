@@ -799,14 +799,14 @@ impl Collides<Cylinder> for Ray {
 impl Collides<LineSegment> for Cylinder {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, seg: &LineSegment) -> bool {
-        line_cylinder_collides(seg.p1, seg.dir, self, 0.0, 1.0)
+        line_cylinder_collides(seg.start, seg.dir(), self, 0.0, 1.0)
     }
 }
 
 impl Collides<Cylinder> for LineSegment {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, cyl: &Cylinder) -> bool {
-        line_cylinder_collides(self.p1, self.dir, cyl, 0.0, 1.0)
+        line_cylinder_collides(self.start, self.dir(), cyl, 0.0, 1.0)
     }
 }
 

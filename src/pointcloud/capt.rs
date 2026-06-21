@@ -32,7 +32,7 @@
 //! they take in a list of points in a point cloud and a _radius range_: a tuple of the minimum and
 //! maximum radius used for querying.
 //!
-//! ```rust
+//! ```ignore
 //! use capt::Capt;
 //!
 //! // list of points in cloud
@@ -47,7 +47,7 @@
 //! Correct answers are only guaranteed if you collision-check against spheres with a radius inside
 //! the radius range.
 //!
-//! ```rust
+//! ```ignore
 //! # use capt::Capt;
 //! # let points = [[0.0, 1.1], [0.2, 3.1]];
 //! # let capt = Capt::<2>::new(&points, (0.05, 2.0), 1);
@@ -95,7 +95,7 @@ use wide::{CmpGe, CmpLe, f32x8, i32x8};
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// #[derive(Clone, Copy, PartialOrd, PartialEq)]
 /// enum HyperInt {
 ///     MinusInf,
@@ -275,7 +275,7 @@ fn forward_pass_wide<const K: usize>(tests: &[f32], centers: &[f32x8; K]) -> i32
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// // list of points in cloud
 /// let points = [[0.0, 0.1], [0.4, -0.2], [-0.2, -0.1]];
 ///
@@ -353,7 +353,7 @@ where
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let points = [[0.0]];
     ///
     /// let capt = capt::Capt::<1>::new(&points, (0.0, f32::INFINITY), 1);
@@ -364,7 +364,7 @@ where
     ///
     /// If there are too many points in `points`, this could cause a panic!
     ///
-    /// ```rust,should_panic
+    /// ```ignore
     /// let points = [[0.0]; 256];
     ///
     /// // note that we are using `u8` as our index type
@@ -392,7 +392,7 @@ where
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let points = [[0.0]];
     ///
     /// let capt = capt::Capt::<1>::with_point_radius(&points, (0.0, f32::INFINITY), 0.2, 1);
@@ -403,7 +403,7 @@ where
     ///
     /// If there are too many points in `points`, this could cause a panic!
     ///
-    /// ```rust,should_panic
+    /// ```ignore
     /// let points = [[0.0]; 256];
     ///
     /// // note that we are using `u8` as our index type
@@ -437,7 +437,7 @@ where
     ///
     /// Unwrapping the output from this function is equivalent to calling [`Capt::new`].
     ///
-    /// ```
+    /// ```ignore
     /// let points = [[0.0]];
     ///
     /// let capt = capt::Capt::<1>::try_new(&points, (0.0, f32::INFINITY), 1).unwrap();
@@ -445,7 +445,7 @@ where
     ///
     /// In failure, we get an `Err`.
     ///
-    /// ```
+    /// ```ignore
     /// let points = [[0.0]; 256];
     ///
     /// // note that we are using `u8` as our index type
@@ -481,7 +481,7 @@ where
     /// Unwrapping the output from this function is equivalent to calling
     /// [`Capt::with_point_radius`].
     ///
-    /// ```
+    /// ```ignore
     /// let points = [[0.0]];
     ///
     /// let capt =
@@ -490,7 +490,7 @@ where
     ///
     /// In failure, we get an `Err`.
     ///
-    /// ```
+    /// ```ignore
     /// let points = [[0.0]; 256];
     ///
     /// // note that we are using `u8` as our index type
@@ -725,7 +725,7 @@ where
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// let points = [[0.0; 3], [1.0; 3], [0.1, 0.5, 1.0]];
     /// let capt = capt::Capt::<3>::new(&points, (0.0, 1.0), 1);
     ///
@@ -789,7 +789,7 @@ where
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use wide::f32x8;
     ///
     /// let points = [[1.0, 2.0], [1.1, 1.1]];

@@ -749,7 +749,7 @@ impl LineAccess for Line {
         self.dir
     }
     fn rdv_(&self) -> f32 {
-        self.rdv
+        crate::line::rdv(self.dir)
     }
 }
 
@@ -761,19 +761,19 @@ impl LineAccess for Ray {
         self.dir
     }
     fn rdv_(&self) -> f32 {
-        self.rdv
+        crate::line::rdv(self.dir)
     }
 }
 
 impl LineAccess for LineSegment {
     fn origin_(&self) -> Vec3 {
-        self.p1
+        self.start
     }
     fn dir_(&self) -> Vec3 {
-        self.dir
+        self.dir()
     }
     fn rdv_(&self) -> f32 {
-        self.rdv
+        crate::line::rdv(self.dir())
     }
 }
 
