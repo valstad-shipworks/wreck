@@ -1,83 +1,40 @@
 use alloc::vec::Vec;
-use core::fmt;
 
 use glam::Vec3;
-
-use inherent::inherent;
 
 use crate::capsule::Capsule;
 use crate::convex_polytope::array::ArrayConvexPolytope;
 use crate::cuboid::Cuboid;
+use crate::line::{Line, rdv};
 use crate::plane::{ConvexPolygon, Plane};
 use crate::sphere::Sphere;
-use crate::wreck_assert;
 use crate::{Collides, ConvexPolytope, Scalable, Stretchable, Transformable};
 
 const T_MIN: f32 = f32::NEG_INFINITY;
 const T_MAX: f32 = f32::INFINITY;
 
-/// An infinite line: `origin + t * dir` for all `t ∈ (-∞, ∞)`.
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Line {
-    pub origin: Vec3,
-    pub dir: Vec3,
-    pub(crate) rdv: f32,
-}
-
-impl Line {
-    pub fn new(origin: Vec3, dir: Vec3) -> Self {
-        wreck_assert!(
-            dir.dot(dir) > f32::EPSILON,
-            "Line direction must be non-zero"
-        );
-        let len_sq = dir.dot(dir);
-        Self {
-            origin,
-            dir,
-            rdv: if len_sq > f32::EPSILON {
-                1.0 / len_sq
-            } else {
-                0.0
-            },
-        }
-    }
-
-    pub fn from_points(a: Vec3, b: Vec3) -> Self {
-        Self::new(a, b - a)
-    }
-}
-
-#[inherent]
 impl Scalable for Line {
-    pub fn scale(&mut self, factor: f32) {
+    fn scale(&mut self, factor: f32) {
         self.dir *= factor;
-        let len_sq = self.dir.dot(self.dir);
-        self.rdv = if len_sq > f32::EPSILON {
-            1.0 / len_sq
-        } else {
-            0.0
-        };
     }
 }
 
-#[inherent]
 impl Transformable for Line {
-    pub fn translate(&mut self, offset: glam::Vec3A) {
+    fn translate(&mut self, offset: glam::Vec3A) {
         self.origin = Vec3::from(glam::Vec3A::from(self.origin) + offset);
     }
 
-    pub fn rotate_mat(&mut self, mat: glam::Mat3A) {
+    fn rotate_mat(&mut self, mat: glam::Mat3A) {
         self.origin = Vec3::from(mat * glam::Vec3A::from(self.origin));
         self.dir = Vec3::from(mat * glam::Vec3A::from(self.dir));
     }
 
-    pub fn rotate_quat(&mut self, quat: glam::Quat) {
+    fn rotate_quat(&mut self, quat: glam::Quat) {
         self.origin = quat * self.origin;
         self.dir = quat * self.dir;
     }
 
-    pub fn transform(&mut self, mat: glam::Affine3A) {
+    fn transform(&mut self, mat: glam::Affine3A) {
         self.origin = Vec3::from(mat.transform_point3a(glam::Vec3A::from(self.origin)));
         self.dir = Vec3::from(mat.matrix3 * glam::Vec3A::from(self.dir));
     }
@@ -145,7 +102,7 @@ impl Stretchable for Line {
 impl Collides<Sphere> for Line {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, sphere: &Sphere) -> bool {
-        super::line_sphere_collides(self.origin, self.dir, self.rdv, sphere, T_MIN, T_MAX)
+        super::line_sphere_collides(self.origin, self.dir, rdv(self.dir), sphere, T_MIN, T_MAX)
     }
 }
 
@@ -261,17 +218,5 @@ impl Collides<Line> for ConvexPolygon {
     #[inline]
     fn test<const BROADPHASE: bool>(&self, line: &Line) -> bool {
         line.test::<BROADPHASE>(self)
-    }
-}
-
-impl fmt::Display for Line {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let o = self.origin;
-        let d = self.dir;
-        write!(
-            f,
-            "Line(origin: [{}, {}, {}], dir: [{}, {}, {}])",
-            o.x, o.y, o.z, d.x, d.y, d.z
-        )
     }
 }

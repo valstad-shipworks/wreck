@@ -1,4 +1,4 @@
-#![cfg(feature = "Valuable")]
+#![cfg(feature = "valuable")]
 //! `valuable::Valuable` impls for the public shape types. Glam fields are
 //! bridged through `glam_traits_ext::GlamValuable`.
 
@@ -11,7 +11,7 @@ use ::valuable::{
 
 use crate::{
     ArrayConvexPolygon, ArrayConvexPolytope, Capsule, ConvexPolygon, ConvexPolytope, Cuboid,
-    Cylinder, Line, LineSegment, NoPcl, Plane, Point, Ray, Sphere,
+    Cylinder, NoPcl, Plane, Point, Sphere,
     capsule::CapsuleStretch, cuboid::CuboidStretch, cylinder::CylinderStretch,
     line::{LineSegmentStretch, LineStretch, RayStretch},
     plane::ConvexPolygonStretch, sphere::SphereStretch,
@@ -174,9 +174,6 @@ impl_struct!(Cuboid {
     axis_aligned: plain,
 });
 impl_struct!(Plane { normal: glam, d: plain });
-impl_struct!(Line { origin: glam, dir: glam, rdv: plain });
-impl_struct!(LineSegment { p1: glam, dir: glam, rdv: plain });
-impl_struct!(Ray { origin: glam, dir: glam, rdv: plain });
 impl_struct!(ConvexPolygon {
     center: glam,
     normal: glam,

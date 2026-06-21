@@ -1331,7 +1331,7 @@ pub(crate) mod batch {
         line_vs_spheres_soa_inner(
             line.origin,
             line.dir,
-            line.rdv,
+            crate::line::rdv(line.dir),
             f32::NEG_INFINITY,
             f32::INFINITY,
             soa,
@@ -1340,12 +1340,20 @@ pub(crate) mod batch {
 
     #[inline]
     pub fn ray_vs_spheres_soa(ray: &Ray, soa: &SpheresSoA) -> bool {
-        line_vs_spheres_soa_inner(ray.origin, ray.dir, ray.rdv, 0.0, f32::INFINITY, soa)
+        line_vs_spheres_soa_inner(
+            ray.origin,
+            ray.dir,
+            crate::line::rdv(ray.dir),
+            0.0,
+            f32::INFINITY,
+            soa,
+        )
     }
 
     #[inline]
     pub fn segment_vs_spheres_soa(seg: &LineSegment, soa: &SpheresSoA) -> bool {
-        line_vs_spheres_soa_inner(seg.p1, seg.dir, seg.rdv, 0.0, 1.0, soa)
+        let dir = seg.dir();
+        line_vs_spheres_soa_inner(seg.start, dir, crate::line::rdv(dir), 0.0, 1.0, soa)
     }
 
     /// True narrowphase sphere-OBB test: one cuboid against many spheres.

@@ -1,6 +1,7 @@
 use glam::Vec3;
 use wreck::{
-    Capsule, Collides, ConvexPolygon, ConvexPolytope, Cuboid, Line, LineSegment, Plane, Ray, Sphere,
+    Capsule, Collides, ConvexPolygon, ConvexPolytope, Cuboid, Line, LineSegment, Plane, Ray,
+    Scalable, Sphere, Transformable,
 };
 
 // ---------------------------------------------------------------------------
@@ -338,12 +339,66 @@ fn segment_collides_many_spheres() {
 fn segment_translate() {
     let mut s = LineSegment::new(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0));
     s.translate(glam::Vec3A::new(0.0, 5.0, 0.0));
-    assert_eq!(s.p1, Vec3::new(0.0, 5.0, 0.0));
+    assert_eq!(s.start, Vec3::new(0.0, 5.0, 0.0));
 }
 
 #[test]
 fn segment_scale() {
     let mut s = LineSegment::new(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0));
     s.scale(3.0);
-    assert!((s.dir.x - 3.0).abs() < 1e-6);
+    assert!((s.dir().x - 3.0).abs() < 1e-6);
+}
+
+#[test]
+fn segment_scale_anchors_at_start() {
+    // Scaling is size-only about the segment's own start, not about the world origin.
+    let start = Vec3::new(2.0, 0.0, 0.0);
+    let mut s = LineSegment::new(start, Vec3::new(3.0, 0.0, 0.0));
+    s.scale(4.0);
+    assert_eq!(s.start, start);
+    assert_eq!(s.end, Vec3::new(6.0, 0.0, 0.0));
+}
+
+#[test]
+fn segment_affine_transform_maps_both_endpoints() {
+    let start = Vec3::new(1.0, -2.0, 0.5);
+    let end = Vec3::new(3.0, 1.0, 2.0);
+    let mut s = LineSegment::new(start, end);
+    let affine = glam::Affine3A::from_scale_rotation_translation(
+        Vec3::new(2.0, 0.5, 1.5),
+        glam::Quat::from_rotation_y(0.7),
+        Vec3::new(1.0, 1.0, 1.0),
+    );
+    s.transform(affine);
+    assert!((s.start - affine.transform_point3(start)).length() < 1e-5);
+    assert!((s.end - affine.transform_point3(end)).length() < 1e-5);
+}
+
+#[test]
+fn segment_rotate_then_translate_maps_endpoints() {
+    let start = Vec3::new(1.0, 2.0, 3.0);
+    let end = Vec3::new(4.0, 0.0, -1.0);
+    let mut s = LineSegment::new(start, end);
+    let rot = glam::Quat::from_rotation_z(std::f32::consts::FRAC_PI_2);
+    let offset = Vec3::new(5.0, -1.0, 2.0);
+    s.rotate_quat(rot);
+    s.translate(glam::Vec3A::from(offset));
+    assert!((s.start - (rot * start + offset)).length() < 1e-5);
+    assert!((s.end - (rot * end + offset)).length() < 1e-5);
+}
+
+#[test]
+fn line_affine_transform_point_and_vector() {
+    // origin moves as a point (picks up translation); dir moves as a free vector.
+    let origin = Vec3::new(1.0, 2.0, 3.0);
+    let dir = Vec3::new(0.0, 1.0, 0.0);
+    let mut l = Line::new(origin, dir);
+    let affine = glam::Affine3A::from_scale_rotation_translation(
+        Vec3::new(2.0, 0.5, 1.5),
+        glam::Quat::from_rotation_x(0.5),
+        Vec3::new(4.0, 0.0, -2.0),
+    );
+    l.transform(affine);
+    assert!((l.origin - affine.transform_point3(origin)).length() < 1e-5);
+    assert!((l.dir - affine.transform_vector3(dir)).length() < 1e-5);
 }

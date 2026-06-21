@@ -175,19 +175,19 @@ fn jacobi_eigenvectors_3x3(mut a: [[f32; 3]; 3]) -> [Vec3; 3] {
         let c = theta.cos();
         let s = theta.sin();
 
-        // Apply rotation to A
-        let mut new_a = a;
+        // Apply rotation to A, columns then rows
+        let mut a_col = a;
         for i in 0..3 {
-            new_a[i][p] = c * a[i][p] + s * a[i][q];
-            new_a[i][q] = -s * a[i][p] + c * a[i][q];
+            a_col[i][p] = c * a[i][p] + s * a[i][q];
+            a_col[i][q] = -s * a[i][p] + c * a[i][q];
         }
-        a = new_a;
-        let mut new_a = a;
+        a = a_col;
+        let mut a_row = a;
         for j in 0..3 {
-            new_a[p][j] = c * a[p][j] + s * a[q][j];
-            new_a[q][j] = -s * a[p][j] + c * a[q][j];
+            a_row[p][j] = c * a[p][j] + s * a[q][j];
+            a_row[q][j] = -s * a[p][j] + c * a[q][j];
         }
-        a = new_a;
+        a = a_row;
 
         // Apply rotation to V
         let mut new_v = v;

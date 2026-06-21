@@ -4,7 +4,6 @@ use crate::capsule::Capsule;
 use crate::convex_polytope::heap::ConvexPolytope;
 use crate::cuboid::Cuboid;
 use crate::cylinder::Cylinder;
-use crate::line::{Line, LineSegment, Ray};
 use crate::plane::{ConvexPolygon, Plane};
 use crate::point::Point;
 use crate::pointcloud::{NoPcl, Pointcloud, PointCloudMarker};
@@ -219,101 +218,6 @@ impl RelativeEq for Plane {
         self.normal
             .relative_eq(&other.normal, epsilon, max_relative)
             && f32::relative_eq(&self.d, &other.d, epsilon, max_relative)
-    }
-}
-
-// --- Line ---
-// Only compare geometric fields; rdv is derived.
-
-impl AbsDiffEq for Line {
-    type Epsilon = f32;
-
-    fn default_epsilon() -> Self::Epsilon {
-        f32::default_epsilon()
-    }
-
-    fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
-        self.origin.abs_diff_eq(other.origin, epsilon) && self.dir.abs_diff_eq(other.dir, epsilon)
-    }
-}
-
-impl RelativeEq for Line {
-    fn default_max_relative() -> Self::Epsilon {
-        f32::default_max_relative()
-    }
-
-    fn relative_eq(
-        &self,
-        other: &Self,
-        epsilon: Self::Epsilon,
-        max_relative: Self::Epsilon,
-    ) -> bool {
-        self.origin
-            .relative_eq(&other.origin, epsilon, max_relative)
-            && self.dir.relative_eq(&other.dir, epsilon, max_relative)
-    }
-}
-
-// --- Ray ---
-// Only compare geometric fields; rdv is derived.
-
-impl AbsDiffEq for Ray {
-    type Epsilon = f32;
-
-    fn default_epsilon() -> Self::Epsilon {
-        f32::default_epsilon()
-    }
-
-    fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
-        self.origin.abs_diff_eq(other.origin, epsilon) && self.dir.abs_diff_eq(other.dir, epsilon)
-    }
-}
-
-impl RelativeEq for Ray {
-    fn default_max_relative() -> Self::Epsilon {
-        f32::default_max_relative()
-    }
-
-    fn relative_eq(
-        &self,
-        other: &Self,
-        epsilon: Self::Epsilon,
-        max_relative: Self::Epsilon,
-    ) -> bool {
-        self.origin
-            .relative_eq(&other.origin, epsilon, max_relative)
-            && self.dir.relative_eq(&other.dir, epsilon, max_relative)
-    }
-}
-
-// --- LineSegment ---
-// Only compare geometric fields; rdv is derived.
-
-impl AbsDiffEq for LineSegment {
-    type Epsilon = f32;
-
-    fn default_epsilon() -> Self::Epsilon {
-        f32::default_epsilon()
-    }
-
-    fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
-        self.p1.abs_diff_eq(other.p1, epsilon) && self.dir.abs_diff_eq(other.dir, epsilon)
-    }
-}
-
-impl RelativeEq for LineSegment {
-    fn default_max_relative() -> Self::Epsilon {
-        f32::default_max_relative()
-    }
-
-    fn relative_eq(
-        &self,
-        other: &Self,
-        epsilon: Self::Epsilon,
-        max_relative: Self::Epsilon,
-    ) -> bool {
-        self.p1.relative_eq(&other.p1, epsilon, max_relative)
-            && self.dir.relative_eq(&other.dir, epsilon, max_relative)
     }
 }
 
