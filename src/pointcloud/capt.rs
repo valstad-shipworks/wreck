@@ -59,11 +59,10 @@
 //! assert!(capt.collides(&center, radius1));
 //! ```
 //!
-//! ## Optional features
+//! ## Querying
 //!
-//! This crate exposes one feature, `simd`, which enables a SIMD-parallel interface for querying
-//! `Capt`s. This enables the function `Capt::collides_simd`, a parallel collision checker for
-//! batches of 8 f32 search queries using the `wide` crate.
+//! [`Capt::query_simd`] is the f32 collision checker: a scalar tree descent followed by a
+//! `hydroplane` SIMD scan of the leaf's affordance buffer.
 //!
 //! ## License
 //!
@@ -81,7 +80,8 @@ use core::{
     ops::{Add, Sub},
 };
 
-use wide::{CmpGe, CmpLe, f32x8, i32x8};
+use glam::Vec3;
+use hydroplane::{Gang, GangGlamExt, Vec3Wide, kernel};
 
 /// A generic trait representing values which may be used as an "axis;" that is, elements of a
 /// vector representing a point.
@@ -239,22 +239,14 @@ fn clamp<A: PartialOrd>(x: A, min: A, max: A) -> A {
     }
 }
 
-#[inline]
-#[allow(clippy::cast_sign_loss, dead_code)]
-fn forward_pass_wide<const K: usize>(tests: &[f32], centers: &[f32x8; K]) -> i32x8 {
-    let mut test_idxs = i32x8::splat(0_i32);
-    let mut k = 0;
-    for _ in 0..tests.len().trailing_ones() {
-        let idx_arr = test_idxs.to_array();
-        let relevant_tests =
-            f32x8::new(idx_arr.map(|i| unsafe { *tests.get_unchecked(i as usize) }));
-        let cmp_f = centers[k % K].simd_ge(relevant_tests);
-        let cmp_bit: i32x8 =
-            unsafe { core::mem::transmute::<f32x8, i32x8>(cmp_f) } & i32x8::splat(1);
-        test_idxs = (test_idxs << 1_i32) + 1_i32 + cmp_bit;
-        k = (k + 1) % K;
-    }
-    test_idxs - i32x8::splat(tests.len() as i32)
+/// Squared distance from a fixed query point to the afforded points stored as the three
+/// columns `xs`/`ys`/`zs`; `true` if any squared distance is `<= rsq`. A `lane < cnt` mask
+/// drops the tail lanes a short final chunk leaves inactive.
+#[kernel]
+fn afforded3_hit<'a>(ctx: Gang, xs: &'a [f32], ys: &'a [f32], zs: &'a [f32], center: Vec3, rsq: f32) -> bool {
+    let c = ctx.splat_vec3(center);
+    let rs = ctx.splat(rsq);
+    ctx.any_n([xs, ys, zs], |[x, y, z]| (c - Vec3Wide::from([x, y, z])).length_squared().le(rs))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -777,108 +769,44 @@ where
     I: Index,
 {
     #[must_use]
-    /// Determine whether any sphere in the list of provided spheres intersects a point in this
-    /// tree.
-    ///
-    /// Each element of `centers` is an [`f32x8`] holding the coordinate for that dimension across
-    /// 8 parallel query spheres. `radii` holds the radius for each of the 8 queries.
-    ///
-    /// # Panics
-    ///
-    /// This function will panic if the `Capt` was not constructed with a lane count of at least 8.
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// use wide::f32x8;
-    ///
-    /// let points = [[1.0, 2.0], [1.1, 1.1]];
-    ///
-    /// let centers = [
-    ///     f32x8::new([1.0, 1.1, 1.2, 1.3, 0.0, 0.0, 0.0, 0.0]), // x-positions
-    ///     f32x8::new([1.0, 1.1, 1.2, 1.3, 0.0, 0.0, 0.0, 0.0]), // y-positions
-    /// ];
-    /// let radii = f32x8::splat(0.05);
-    ///
-    /// let tree = capt::Capt::<2, f32, u32>::new(&points, (0.0, 0.1), 8);
-    ///
-    /// println!("{tree:?}");
-    ///
-    /// assert!(tree.collides_simd(&centers, radii));
-    /// ```
-    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-    pub fn collides_simd(&self, centers: &[f32x8; K], mut radii: f32x8) -> bool {
-        assert!(
-            1 << self.lanes_log2 >= 8,
-            "CAPT must be constructed with at least 8 lanes for f32x8 queries"
-        );
-        radii = radii + f32x8::splat(self.r_point);
-        let zs = forward_pass_wide(&self.tests, centers);
-        let zs_arr = zs.to_array();
+    /// Like [`Capt::collides`] but vectorises the affordance-buffer distance scan with a
+    /// `hydroplane` kernel for the common `K = 3` case: the tree descent stays scalar, the
+    /// per-leaf point scan runs as SIMD.
+    pub fn query_simd(&self, center: &[f32; K], radius: f32) -> bool {
+        let radius = radius + self.r_point;
+        let mut test_idx = 0;
+        let mut k = 0;
+        for _ in 0..self.tests.len().trailing_ones() {
+            test_idx = 2 * test_idx
+                + 1
+                + usize::from(unsafe { *self.tests.get_unchecked(test_idx) } <= center[k]);
+            k = (k + 1) % K;
+        }
 
-        // AABB inbounds check: flat f32 view of aabb array (lo[0..K] then hi[0..K] per entry)
-        let aabb_f32 = unsafe {
-            core::slice::from_raw_parts(self.aabbs.as_ptr().cast::<f32>(), self.aabbs.len() * 2 * K)
-        };
-        let all_true: f32x8 = unsafe { core::mem::transmute::<i32x8, f32x8>(i32x8::splat(-1_i32)) };
-        let mut inbounds = all_true;
-        for k in 0..K {
-            let lo_vals = f32x8::new(core::array::from_fn(|j| unsafe {
-                *aabb_f32.get_unchecked(zs_arr[j] as usize * (2 * K) + k)
-            }));
-            inbounds = inbounds & (lo_vals - radii).simd_le(centers[k]);
-        }
-        for k in 0..K {
-            let hi_vals = f32x8::new(core::array::from_fn(|j| unsafe {
-                *aabb_f32.get_unchecked(zs_arr[j] as usize * (2 * K) + K + k)
-            }));
-            inbounds = inbounds & hi_vals.simd_ge(centers[k] - radii);
-        }
-        if !inbounds.any() {
+        let rsq = radius * radius;
+        let i = test_idx - self.tests.len();
+        let aabb = unsafe { self.aabbs.get_unchecked(i) };
+        if aabb.closest_distsq_to(center) > rsq {
             return false;
         }
 
-        let inbounds_arr: [i32; 8] =
-            unsafe { core::mem::transmute::<f32x8, i32x8>(inbounds) }.to_array();
-        let starts: [usize; 8] = core::array::from_fn(|j| unsafe {
-            self.starts[zs_arr[j] as usize]
-                .try_into()
-                .unwrap_unchecked()
-        });
-        let ends: [usize; 8] = core::array::from_fn(|j| unsafe {
-            self.starts[zs_arr[j] as usize + 1]
-                .try_into()
-                .unwrap_unchecked()
-        });
+        let start: usize = unsafe { self.starts[i].try_into().unwrap_unchecked() };
+        let end: usize = unsafe { self.starts[i + 1].try_into().unwrap_unchecked() };
 
-        let centers_arr: [[f32; 8]; K] = core::array::from_fn(|k| centers[k].to_array());
-        let radii_arr = radii.to_array();
-
-        for j in 0..8 {
-            if inbounds_arr[j] == 0 {
-                continue;
-            }
-            let start = starts[j];
-            let end = ends[j];
-            let n_center: [f32x8; K] = core::array::from_fn(|k| f32x8::splat(centers_arr[k][j]));
-            let rs = f32x8::splat(radii_arr[j]);
-            let rs_sq = rs * rs;
-            let mut i = start;
-            while i < end {
-                let mut dists_sq = f32x8::ZERO;
-                #[allow(clippy::needless_range_loop)]
-                for k in 0..K {
-                    let vals: f32x8 = unsafe { *self.afforded[k].as_ptr().add(i).cast() };
-                    let diff = vals - n_center[k];
-                    dists_sq = dists_sq + diff * diff;
-                }
-                if dists_sq.simd_le(rs_sq).any() {
-                    return true;
-                }
-                i += 8;
-            }
+        if K == 3 {
+            afforded3_hit(
+                &self.afforded[0][start..end],
+                &self.afforded[1][start..end],
+                &self.afforded[2][start..end],
+                glam::Vec3::new(center[0], center[1], center[2]),
+                rsq,
+            )
+        } else {
+            (start..end).any(|i| {
+                let aff_pt = array::from_fn(|k| self.afforded[k][i]);
+                distsq(aff_pt, *center) <= rsq
+            })
         }
-        false
     }
 }
 

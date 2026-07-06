@@ -1,6 +1,6 @@
 # wreck
 
-A 3D collision detection library for Rust. Built on top of `glam` for math and `wide` for SIMD acceleration.
+A 3D collision detection library for Rust. Built on top of `glam` for math and [`hydroplane`](../hydroplane) for runtime-dispatched SIMD acceleration (SSE4 / AVX2 / AVX-512 / NEON, selected per host CPU).
 
 ## Traits
 

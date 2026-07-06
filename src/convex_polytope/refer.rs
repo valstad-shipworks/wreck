@@ -1,5 +1,5 @@
 use glam::Vec3;
-use wide::{CmpGt, f32x8};
+use hydroplane::{Gang, GangGlamExt, kernel};
 
 use crate::capsule::Capsule;
 use crate::convex_polytope::array::ArrayConvexPolytope;
@@ -38,46 +38,13 @@ impl<'a> RefConvexPolytope<'a> {
 }
 
 // ---------------------------------------------------------------------------
-// SIMD helpers: gather 8 planes into SoA layout
-// ---------------------------------------------------------------------------
-
-#[inline]
-fn gather_planes(chunk: &[(Vec3, f32)]) -> (f32x8, f32x8, f32x8, f32x8) {
-    let mut nx = [0.0f32; 8];
-    let mut ny = [0.0f32; 8];
-    let mut nz = [0.0f32; 8];
-    let mut d = [0.0f32; 8];
-    for (i, &(normal, dist)) in chunk.iter().enumerate() {
-        nx[i] = normal.x;
-        ny[i] = normal.y;
-        nz[i] = normal.z;
-        d[i] = dist;
-    }
-    (
-        f32x8::new(nx),
-        f32x8::new(ny),
-        f32x8::new(nz),
-        f32x8::new(d),
-    )
-}
-
-/// Dot product of 8 plane normals (SoA) with a single point, minus d.
-#[inline]
-fn dot8_minus_d(
-    nx: f32x8,
-    ny: f32x8,
-    nz: f32x8,
-    d: f32x8,
-    px: f32x8,
-    py: f32x8,
-    pz: f32x8,
-) -> f32x8 {
-    nx * px + ny * py + nz * pz - d
-}
-
-// ---------------------------------------------------------------------------
 // Collision implementations on RefConvexPolytope
 // ---------------------------------------------------------------------------
+//
+// A convex polytope is the intersection of its half-spaces, so a shape collides
+// with it unless some plane is a separating axis. Each kernel walks the plane
+// list and returns `true` as soon as one active lane separates; a `lane < cnt`
+// mask removes the tail lanes a short final chunk leaves inactive.
 
 impl RefConvexPolytope<'_> {
     #[inline]
@@ -85,29 +52,7 @@ impl RefConvexPolytope<'_> {
         if BROADPHASE && !sphere.collides(self.obb) {
             return false;
         }
-
-        let cx = f32x8::splat(sphere.center.x);
-        let cy = f32x8::splat(sphere.center.y);
-        let cz = f32x8::splat(sphere.center.z);
-        let r = f32x8::splat(sphere.radius);
-        let zero = f32x8::ZERO;
-
-        let chunks = self.planes.chunks_exact(8);
-        let remainder = chunks.remainder();
-
-        for chunk in chunks {
-            let (nx, ny, nz, d) = gather_planes(chunk);
-            let sep = dot8_minus_d(nx, ny, nz, d, cx, cy, cz) - r;
-            if sep.simd_gt(zero).any() {
-                return false;
-            }
-        }
-        for &(normal, d) in remainder {
-            if normal.dot(sphere.center) - d - sphere.radius > 0.0 {
-                return false;
-            }
-        }
-        true
+        !sphere_separated_k(self.planes, sphere.center, sphere.radius)
     }
 
     #[inline]
@@ -115,48 +60,7 @@ impl RefConvexPolytope<'_> {
         if BROADPHASE && !cuboid.collides(self.obb) {
             return false;
         }
-
-        let cx = f32x8::splat(cuboid.center.x);
-        let cy = f32x8::splat(cuboid.center.y);
-        let cz = f32x8::splat(cuboid.center.z);
-        let ax0 = f32x8::splat(cuboid.axes[0].x);
-        let ay0 = f32x8::splat(cuboid.axes[0].y);
-        let az0 = f32x8::splat(cuboid.axes[0].z);
-        let ax1 = f32x8::splat(cuboid.axes[1].x);
-        let ay1 = f32x8::splat(cuboid.axes[1].y);
-        let az1 = f32x8::splat(cuboid.axes[1].z);
-        let ax2 = f32x8::splat(cuboid.axes[2].x);
-        let ay2 = f32x8::splat(cuboid.axes[2].y);
-        let az2 = f32x8::splat(cuboid.axes[2].z);
-        let h0 = f32x8::splat(cuboid.half_extents[0]);
-        let h1 = f32x8::splat(cuboid.half_extents[1]);
-        let h2 = f32x8::splat(cuboid.half_extents[2]);
-        let zero = f32x8::ZERO;
-
-        let chunks = self.planes.chunks_exact(8);
-        let remainder = chunks.remainder();
-
-        for chunk in chunks {
-            let (nx, ny, nz, d) = gather_planes(chunk);
-            let center_proj = nx * cx + ny * cy + nz * cz;
-            let extent_proj = (nx * ax0 + ny * ay0 + nz * az0).abs() * h0
-                + (nx * ax1 + ny * ay1 + nz * az1).abs() * h1
-                + (nx * ax2 + ny * ay2 + nz * az2).abs() * h2;
-            let sep = center_proj - extent_proj - d;
-            if sep.simd_gt(zero).any() {
-                return false;
-            }
-        }
-        for &(normal, d) in remainder {
-            let center_proj = normal.dot(cuboid.center);
-            let extent_proj = (normal.dot(cuboid.axes[0]).abs() * cuboid.half_extents[0])
-                + (normal.dot(cuboid.axes[1]).abs() * cuboid.half_extents[1])
-                + (normal.dot(cuboid.axes[2]).abs() * cuboid.half_extents[2]);
-            if center_proj - extent_proj - d > 0.0 {
-                return false;
-            }
-        }
-        true
+        !cuboid_separated_k(self.planes, cuboid.center, cuboid.axes, cuboid.half_extents)
     }
 
     #[inline]
@@ -168,39 +72,7 @@ impl RefConvexPolytope<'_> {
                 return false;
             }
         }
-
-        let p1x = f32x8::splat(capsule.p1.x);
-        let p1y = f32x8::splat(capsule.p1.y);
-        let p1z = f32x8::splat(capsule.p1.z);
-        let p2 = capsule.p2();
-        let p2x = f32x8::splat(p2.x);
-        let p2y = f32x8::splat(p2.y);
-        let p2z = f32x8::splat(p2.z);
-        let r = f32x8::splat(capsule.radius);
-        let zero = f32x8::ZERO;
-
-        let chunks = self.planes.chunks_exact(8);
-        let remainder = chunks.remainder();
-
-        for chunk in chunks {
-            let (nx, ny, nz, d) = gather_planes(chunk);
-            let proj1 = nx * p1x + ny * p1y + nz * p1z;
-            let proj2 = nx * p2x + ny * p2y + nz * p2z;
-            let min_proj = proj1.min(proj2);
-            let sep = min_proj - r - d;
-            if sep.simd_gt(zero).any() {
-                return false;
-            }
-        }
-        for &(normal, d) in remainder {
-            let proj_p1 = normal.dot(capsule.p1);
-            let proj_p2 = normal.dot(p2);
-            let min_proj = proj_p1.min(proj_p2);
-            if min_proj - capsule.radius - d > 0.0 {
-                return false;
-            }
-        }
-        true
+        !capsule_separated_k(self.planes, capsule.p1, capsule.p2(), capsule.radius)
     }
 
     #[inline]
@@ -208,28 +80,7 @@ impl RefConvexPolytope<'_> {
         if BROADPHASE && self.obb.point_dist_sq(point.0) > 0.0 {
             return false;
         }
-
-        let px = f32x8::splat(point.0.x);
-        let py = f32x8::splat(point.0.y);
-        let pz = f32x8::splat(point.0.z);
-        let zero = f32x8::ZERO;
-
-        let chunks = self.planes.chunks_exact(8);
-        let remainder = chunks.remainder();
-
-        for chunk in chunks {
-            let (nx, ny, nz, d) = gather_planes(chunk);
-            let sep = dot8_minus_d(nx, ny, nz, d, px, py, pz);
-            if sep.simd_gt(zero).any() {
-                return false;
-            }
-        }
-        for &(normal, d) in remainder {
-            if normal.dot(point.0) > d {
-                return false;
-            }
-        }
-        true
+        !point_separated_k(self.planes, point.0)
     }
 
     #[inline]
@@ -242,22 +93,113 @@ impl RefConvexPolytope<'_> {
             return false;
         }
 
-        // Test self's planes as separating axes against other's vertices
-        for &(normal, d) in self.planes {
-            let min_proj = super::min_projection(other.vertices, normal);
-            if min_proj > d {
-                return false;
-            }
-        }
-
-        // Test other's planes as separating axes against self's vertices
-        for &(normal, d) in other.planes {
-            let min_proj = super::min_projection(self.vertices, normal);
-            if min_proj > d {
-                return false;
-            }
-        }
-
-        true
+        !polytopes_separated_k(self.planes, self.vertices, other.planes, other.vertices)
     }
+}
+
+/// Bilateral SAT over both polytopes' planes, one dispatch for the whole test. Each vertex set
+/// is staged column-wise so the per-plane sweeps use column loads instead of per-lane gathers;
+/// `a_verts` is staged lazily since a separating plane of `a` skips it entirely.
+#[kernel]
+fn polytopes_separated_k<'a>(
+    ctx: Gang,
+    a_planes: &'a [(Vec3, f32)],
+    a_verts: &'a [Vec3],
+    b_planes: &'a [(Vec3, f32)],
+    b_verts: &'a [Vec3],
+) -> bool {
+    let b_cols = super::stage_cols(b_verts);
+    let (bx, by, bz) = super::cols3(&b_cols);
+    for &(normal, d) in a_planes {
+        if super::min_projection_cols_k_on(ctx, bx, by, bz, normal) > d {
+            return true;
+        }
+    }
+
+    let a_cols = super::stage_cols(a_verts);
+    let (ax, ay, az) = super::cols3(&a_cols);
+    for &(normal, d) in b_planes {
+        if super::min_projection_cols_k_on(ctx, ax, ay, az, normal) > d {
+            return true;
+        }
+    }
+    false
+}
+
+// ---------------------------------------------------------------------------
+// Separating-axis kernels: `true` if some plane separates the shape from the
+// polytope (so the shape is outside).
+// ---------------------------------------------------------------------------
+
+#[kernel]
+fn sphere_separated_k<'a>(ctx: Gang, planes: &'a [(Vec3, f32)], center: Vec3, r: f32) -> bool {
+    let zero = ctx.splat(0.0);
+    let c = ctx.splat_vec3(center);
+
+    for (off, cnt, active) in ctx.masked_chunks::<f32>(planes.len()) {
+        let (n, d) = ctx.gather_plane(&planes[off..off + cnt], 0.0);
+        let sep = n.dot(c) - d - r;
+        if (sep.gt(zero) & active).any() {
+            return true;
+        }
+    }
+    false
+}
+
+#[kernel]
+fn point_separated_k<'a>(ctx: Gang, planes: &'a [(Vec3, f32)], p: Vec3) -> bool {
+    let zero = ctx.splat(0.0);
+    let pv = ctx.splat_vec3(p);
+
+    for (off, cnt, active) in ctx.masked_chunks::<f32>(planes.len()) {
+        let (n, d) = ctx.gather_plane(&planes[off..off + cnt], 0.0);
+        let sep = n.dot(pv) - d;
+        if (sep.gt(zero) & active).any() {
+            return true;
+        }
+    }
+    false
+}
+
+#[kernel]
+fn capsule_separated_k<'a>(ctx: Gang, planes: &'a [(Vec3, f32)], p1: Vec3, p2: Vec3, r: f32) -> bool {
+    let zero = ctx.splat(0.0);
+    let p1v = ctx.splat_vec3(p1);
+    let p2v = ctx.splat_vec3(p2);
+
+    for (off, cnt, active) in ctx.masked_chunks::<f32>(planes.len()) {
+        let (n, d) = ctx.gather_plane(&planes[off..off + cnt], 0.0);
+        let sep = n.dot(p1v).min(n.dot(p2v)) - d - r;
+        if (sep.gt(zero) & active).any() {
+            return true;
+        }
+    }
+    false
+}
+
+#[kernel]
+fn cuboid_separated_k<'a>(
+    ctx: Gang,
+    planes: &'a [(Vec3, f32)],
+    center: Vec3,
+    axes: [Vec3; 3],
+    he: [f32; 3],
+) -> bool {
+    let zero = ctx.splat(0.0);
+    let c = ctx.splat_vec3(center);
+    let axes = axes.map(|a| ctx.splat_vec3(a));
+
+    for (off, cnt, active) in ctx.masked_chunks::<f32>(planes.len()) {
+        let (n, d) = ctx.gather_plane(&planes[off..off + cnt], 0.0);
+        let center_proj = n.dot(c);
+        let mut extent_proj = zero;
+        for a in 0..3 {
+            extent_proj = extent_proj + n.dot(axes[a]).abs() * he[a];
+        }
+        let sep = center_proj - extent_proj - d;
+        if (sep.gt(zero) & active).any() {
+            return true;
+        }
+    }
+    false
 }

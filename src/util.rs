@@ -88,6 +88,7 @@ pub(crate) const fn dot(a: glam::Vec3, b: glam::Vec3) -> f32 {
     a.x * b.x + a.y * b.y + a.z * b.z
 }
 
+
 #[cfg(not(feature = "std"))]
 pub(crate) trait F32Ext {
     fn sqrt(self) -> f32;

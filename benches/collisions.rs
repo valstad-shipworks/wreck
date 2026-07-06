@@ -7,8 +7,8 @@ use rand::rngs::SmallRng;
 use std::hint::black_box;
 
 use wreck::{
-    Capsule, Collides, ConvexPolygon, Cuboid, Cylinder, Line, LineSegment, Plane, Point, Ray,
-    Sphere,
+    Capsule, Collider, Collides, ConvexPolygon, Cuboid, Cylinder, Line, LineSegment, Plane, Point,
+    Ray, Sphere,
 };
 
 fn rand_vec3(rng: &mut SmallRng, range: f32) -> Vec3 {
@@ -389,6 +389,22 @@ fn bench_sphere_pcl(c: &mut Criterion) {
     });
 }
 
+fn bench_pcl_aabb(c: &mut Criterion) {
+    let mut rng = SmallRng::seed_from_u64(42);
+    let pcl = rand_pointcloud(&mut rng, 50_000);
+    c.bench_function("pcl_aabb_50k", |b| b.iter(|| black_box(&pcl).aabb()));
+}
+
+fn bench_line_pcl(c: &mut Criterion) {
+    let mut rng = SmallRng::seed_from_u64(42);
+    let pcl = rand_pointcloud(&mut rng, 50_000);
+    // far away -> full scan (worst case throughput)
+    let line = Line::new(Vec3::new(1000.0, 0.0, 0.0), Vec3::Z);
+    c.bench_function("line_pcl_50k", |b| {
+        b.iter(|| black_box(&line).collides(black_box(&pcl)))
+    });
+}
+
 fn bench_capsule_pcl(c: &mut Criterion) {
     let mut rng = SmallRng::seed_from_u64(42);
     let pcl = rand_pointcloud(&mut rng, 50_000);
@@ -667,6 +683,24 @@ fn bench_point_polytope(c: &mut Criterion) {
             let mut count = 0u32;
             for (p, poly) in points.iter().zip(polytopes.iter()) {
                 if black_box(p).collides(black_box(poly)) {
+                    count += 1;
+                }
+            }
+            count
+        })
+    });
+}
+
+fn bench_polytope_polytope(c: &mut Criterion) {
+    let mut rng = SmallRng::seed_from_u64(42);
+    let a: Vec<_> = (0..N_PAIRS).map(|_| rand_polytope(&mut rng)).collect();
+    let b_polys: Vec<_> = (0..N_PAIRS).map(|_| rand_polytope(&mut rng)).collect();
+
+    c.bench_function("polytope_polytope_26p", |b| {
+        b.iter(|| {
+            let mut count = 0u32;
+            for (pa, pb) in a.iter().zip(b_polys.iter()) {
+                if black_box(pa).collides(black_box(pb)) {
                     count += 1;
                 }
             }
@@ -1287,6 +1321,291 @@ fn bench_point_cylinder(c: &mut Criterion) {
 }
 
 // Primitive collision benchmarks (always available)
+// ── Collider vs Collider (the common production path) ────────────────────────
+
+fn mixed_collider(rng: &mut SmallRng, n_each: usize) -> Collider {
+    let mut c = Collider::new();
+    for _ in 0..n_each {
+        c.add(rand_sphere(rng));
+    }
+    for _ in 0..n_each {
+        c.add(rand_capsule(rng));
+    }
+    for _ in 0..n_each {
+        c.add(rand_cuboid(rng));
+    }
+    c
+}
+
+fn sphere_collider(rng: &mut SmallRng, n: usize) -> Collider {
+    let mut c = Collider::new();
+    for _ in 0..n {
+        c.add(rand_sphere(rng));
+    }
+    c
+}
+
+fn capsule_collider(rng: &mut SmallRng, n: usize) -> Collider {
+    let mut c = Collider::new();
+    for _ in 0..n {
+        c.add(rand_capsule(rng));
+    }
+    c
+}
+
+fn bench_collider_mixed(c: &mut Criterion) {
+    let mut rng = SmallRng::seed_from_u64(42);
+    let pairs: Vec<_> = (0..N_PAIRS)
+        .map(|_| (mixed_collider(&mut rng, 3), mixed_collider(&mut rng, 3)))
+        .collect();
+    c.bench_function("collider_mixed", |b| {
+        b.iter(|| {
+            let mut count = 0u32;
+            for (a, o) in &pairs {
+                if black_box(a).collides_other(black_box(o)) {
+                    count += 1;
+                }
+            }
+            count
+        })
+    });
+}
+
+fn bench_collider_spheres(c: &mut Criterion) {
+    let mut rng = SmallRng::seed_from_u64(42);
+    let pairs: Vec<_> = (0..N_PAIRS)
+        .map(|_| (sphere_collider(&mut rng, 32), sphere_collider(&mut rng, 32)))
+        .collect();
+    c.bench_function("collider_spheres_32", |b| {
+        b.iter(|| {
+            let mut count = 0u32;
+            for (a, o) in &pairs {
+                if black_box(a).collides_other(black_box(o)) {
+                    count += 1;
+                }
+            }
+            count
+        })
+    });
+}
+
+fn bench_collider_spheres_small(c: &mut Criterion) {
+    let mut rng = SmallRng::seed_from_u64(42);
+    let pairs: Vec<_> = (0..N_PAIRS)
+        .map(|_| (sphere_collider(&mut rng, 5), sphere_collider(&mut rng, 5)))
+        .collect();
+    c.bench_function("collider_spheres_5", |b| {
+        b.iter(|| {
+            let mut count = 0u32;
+            for (a, o) in &pairs {
+                if black_box(a).collides_other(black_box(o)) {
+                    count += 1;
+                }
+            }
+            count
+        })
+    });
+}
+
+fn bench_collider_capsules(c: &mut Criterion) {
+    let mut rng = SmallRng::seed_from_u64(42);
+    let pairs: Vec<_> = (0..N_PAIRS)
+        .map(|_| (capsule_collider(&mut rng, 16), capsule_collider(&mut rng, 16)))
+        .collect();
+    c.bench_function("collider_capsules_16", |b| {
+        b.iter(|| {
+            let mut count = 0u32;
+            for (a, o) in &pairs {
+                if black_box(a).collides_other(black_box(o)) {
+                    count += 1;
+                }
+            }
+            count
+        })
+    });
+}
+
+fn dense_capsule_collider(rng: &mut SmallRng, n: usize) -> Collider {
+    let mut c = Collider::new();
+    for _ in 0..n {
+        let p1 = rand_vec3(rng, 2.0);
+        let p2 = p1 + rand_vec3(rng, 1.5);
+        c.add(Capsule::new(p1, p2, rng.random_range(0.02..0.06)));
+    }
+    c
+}
+
+fn dense_cuboid_collider(rng: &mut SmallRng, n: usize) -> Collider {
+    let mut c = Collider::new();
+    for _ in 0..n {
+        let center = rand_vec3(rng, 2.0);
+        let he = [rng.random_range(0.04..0.1), rng.random_range(0.04..0.1), rng.random_range(0.04..0.1)];
+        let quat = glam::Quat::from_euler(
+            glam::EulerRot::XYZ,
+            rng.random_range(0.0..std::f32::consts::TAU),
+            rng.random_range(0.0..std::f32::consts::TAU),
+            rng.random_range(0.0..std::f32::consts::TAU),
+        );
+        c.add(Cuboid::new(center, [quat * Vec3::X, quat * Vec3::Y, quat * Vec3::Z], he));
+    }
+    c
+}
+
+fn bench_collider_dense_capsules(c: &mut Criterion) {
+    let mut rng = SmallRng::seed_from_u64(7);
+    let pairs: Vec<_> = (0..N_PAIRS)
+        .map(|_| (dense_capsule_collider(&mut rng, 16), dense_capsule_collider(&mut rng, 16)))
+        .collect();
+    c.bench_function("collider_dense_capsules_16", |b| {
+        b.iter(|| {
+            let mut count = 0u32;
+            for (a, o) in &pairs {
+                if black_box(a).collides_other(black_box(o)) {
+                    count += 1;
+                }
+            }
+            count
+        })
+    });
+}
+
+fn bench_collider_dense_cuboids(c: &mut Criterion) {
+    let mut rng = SmallRng::seed_from_u64(7);
+    let pairs: Vec<_> = (0..N_PAIRS)
+        .map(|_| (dense_cuboid_collider(&mut rng, 16), dense_cuboid_collider(&mut rng, 16)))
+        .collect();
+    c.bench_function("collider_dense_cuboids_16", |b| {
+        b.iter(|| {
+            let mut count = 0u32;
+            for (a, o) in &pairs {
+                if black_box(a).collides_other(black_box(o)) {
+                    count += 1;
+                }
+            }
+            count
+        })
+    });
+}
+
+fn mixed4_collider(rng: &mut SmallRng, n_each: usize) -> Collider {
+    let mut c = Collider::new();
+    for _ in 0..n_each {
+        c.add(rand_sphere(rng));
+    }
+    for _ in 0..n_each {
+        c.add(rand_capsule(rng));
+    }
+    for _ in 0..n_each {
+        c.add(rand_cuboid(rng));
+    }
+    for _ in 0..n_each {
+        c.add(rand_cylinder(rng));
+    }
+    c
+}
+
+fn bench_collider_mixed4(c: &mut Criterion) {
+    let mut rng = SmallRng::seed_from_u64(42);
+    let pairs: Vec<_> = (0..N_PAIRS)
+        .map(|_| (mixed4_collider(&mut rng, 4), mixed4_collider(&mut rng, 4)))
+        .collect();
+    c.bench_function("collider_mixed4_16", |b| {
+        b.iter(|| {
+            let mut count = 0u32;
+            for (a, o) in &pairs {
+                if black_box(a).collides_other(black_box(o)) {
+                    count += 1;
+                }
+            }
+            count
+        })
+    });
+}
+
+fn cuboid_collider(rng: &mut SmallRng, n: usize) -> Collider {
+    let mut c = Collider::new();
+    for _ in 0..n {
+        c.add(rand_cuboid(rng));
+    }
+    c
+}
+
+fn cylinder_collider(rng: &mut SmallRng, n: usize) -> Collider {
+    let mut c = Collider::new();
+    for _ in 0..n {
+        c.add(rand_cylinder(rng));
+    }
+    c
+}
+
+fn bench_collider_cross_capsule_cuboid(c: &mut Criterion) {
+    let mut rng = SmallRng::seed_from_u64(42);
+    let pairs: Vec<_> = (0..N_PAIRS)
+        .map(|_| (capsule_collider(&mut rng, 16), cuboid_collider(&mut rng, 16)))
+        .collect();
+    c.bench_function("collider_cross_capsule_cuboid_16", |b| {
+        b.iter(|| {
+            let mut count = 0u32;
+            for (a, o) in &pairs {
+                if black_box(a).collides_other(black_box(o)) {
+                    count += 1;
+                }
+            }
+            count
+        })
+    });
+}
+
+fn bench_collider_cuboids(c: &mut Criterion) {
+    let mut rng = SmallRng::seed_from_u64(42);
+    let pairs: Vec<_> = (0..N_PAIRS)
+        .map(|_| (cuboid_collider(&mut rng, 16), cuboid_collider(&mut rng, 16)))
+        .collect();
+    c.bench_function("collider_cuboids_16", |b| {
+        b.iter(|| {
+            let mut count = 0u32;
+            for (a, o) in &pairs {
+                if black_box(a).collides_other(black_box(o)) {
+                    count += 1;
+                }
+            }
+            count
+        })
+    });
+}
+
+fn bench_collider_cylinders(c: &mut Criterion) {
+    let mut rng = SmallRng::seed_from_u64(42);
+    let pairs: Vec<_> = (0..N_PAIRS)
+        .map(|_| (cylinder_collider(&mut rng, 16), cylinder_collider(&mut rng, 16)))
+        .collect();
+    c.bench_function("collider_cylinders_16", |b| {
+        b.iter(|| {
+            let mut count = 0u32;
+            for (a, o) in &pairs {
+                if black_box(a).collides_other(black_box(o)) {
+                    count += 1;
+                }
+            }
+            count
+        })
+    });
+}
+
+criterion_group!(
+    collider_benches,
+    bench_collider_mixed,
+    bench_collider_spheres,
+    bench_collider_spheres_small,
+    bench_collider_capsules,
+    bench_collider_cuboids,
+    bench_collider_cylinders,
+    bench_collider_cross_capsule_cuboid,
+    bench_collider_dense_capsules,
+    bench_collider_dense_cuboids,
+    bench_collider_mixed4,
+);
+
 criterion_group!(
     primitive_benches,
     bench_sphere_sphere,
@@ -1331,6 +1650,7 @@ criterion_group!(
     bench_sphere_polytope,
     bench_cuboid_polytope,
     bench_point_polytope,
+    bench_polytope_polytope,
     bench_stretch_sphere,
     bench_stretch_capsule_aligned,
     bench_stretch_capsule_unaligned,
@@ -1349,6 +1669,8 @@ criterion_group!(
 criterion_group!(
     pcl_benches,
     bench_sphere_pcl,
+    bench_pcl_aabb,
+    bench_line_pcl,
     bench_capsule_pcl,
     bench_cuboid_pcl,
     bench_polygon_pcl,
@@ -1356,4 +1678,9 @@ criterion_group!(
     bench_sphere_pcl_small,
 );
 
-criterion_main!(primitive_benches, polytope_benches, pcl_benches);
+criterion_main!(
+    collider_benches,
+    primitive_benches,
+    polytope_benches,
+    pcl_benches
+);

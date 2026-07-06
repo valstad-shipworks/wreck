@@ -229,27 +229,47 @@ impl Stretchable for ConvexPolytope {
                 if side_n.length_squared() < 1e-10 {
                     continue;
                 }
-                let side_n = side_n.normalize();
-                side_normals.push(side_n);
-                side_normals.push(-side_n);
+                // Only the positive orientation is stored; the projection kernel derives the
+                // mirrored plane from the same min/max sweep.
+                side_normals.push(side_n.normalize());
             }
         }
 
-        for sn in &side_normals {
-            let d = max_projection(&vertices, *sn);
-            let min_d = min_projection(&vertices, *sn);
-            if (d - min_d).abs() > 1e-6 {
-                let dominated = planes.iter().any(|&(n, _)| n.dot(*sn) > 0.9999);
-                if !dominated {
-                    planes.push((*sn, d));
-                }
-            }
-        }
+        append_side_planes_k(&vertices, &side_normals, &mut planes);
 
         // Derive OBB analytically from original OBB: same axes, extended extents
         let obb = stretch_obb(&self.obb, translation);
 
         ConvexPolytope::with_obb(planes, vertices, obb)
+    }
+}
+
+/// Project the stretched vertices onto every silhouette side normal and append the
+/// non-degenerate, non-dominated ones (and their mirrors) as planes — one dispatch for the
+/// whole sweep. The vertices are staged column-wise once so each normal's projection is
+/// contiguous loads instead of per-lane gathers, and one fused min/max sweep serves both plane
+/// orientations (`max(-n·v) == -min(n·v)` exactly).
+#[kernel]
+fn append_side_planes_k<'a>(
+    ctx: Gang,
+    verts: &'a [Vec3],
+    side_normals: &'a [Vec3],
+    planes: &'a mut Vec<(Vec3, f32)>,
+) {
+    let cols = stage_cols(verts);
+    let (xs, ys, zs) = cols3(&cols);
+
+    for &sn in side_normals {
+        let (min_d, d) = minmax_projection_cols_k_on(ctx, xs, ys, zs, sn);
+        if (d - min_d).abs() > 1e-6 {
+            if !planes.iter().any(|&(n, _)| n.dot(sn) > 0.9999) {
+                planes.push((sn, d));
+            }
+            let mirrored = -sn;
+            if !planes.iter().any(|&(n, _)| n.dot(mirrored) > 0.9999) {
+                planes.push((mirrored, -min_d));
+            }
+        }
     }
 }
 

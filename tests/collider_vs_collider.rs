@@ -314,3 +314,113 @@ fn sphere_outside_polytope_bounding() {
     assert_eq!(a.collides_other(&h), narrow_hit);
     assert_eq!(h.collides_other(&a), narrow_hit);
 }
+
+// The single-dispatch capsule SoA-vs-SoA batch (used when both colliders hold only capsules) must
+// agree with the brute-force all-pairs scalar narrowphase across many random configurations.
+#[test]
+fn capsule_collider_soa_batch_matches_bruteforce() {
+    use rand::{Rng, SeedableRng, rngs::SmallRng};
+
+    let mut rng = SmallRng::seed_from_u64(2024);
+    let rand_cap = |rng: &mut SmallRng| {
+        let p1 = Vec3::new(rng.random_range(-3.0..3.0), rng.random_range(-3.0..3.0), rng.random_range(-3.0..3.0));
+        let seg = Vec3::new(rng.random_range(-2.0..2.0), rng.random_range(-2.0..2.0), rng.random_range(-2.0..2.0));
+        Capsule::new(p1, p1 + seg, rng.random_range(0.1..1.2))
+    };
+
+    for _ in 0..500 {
+        let na = rng.random_range(1..20usize);
+        let nb = rng.random_range(1..20usize);
+        let caps_a: Vec<Capsule> = (0..na).map(|_| rand_cap(&mut rng)).collect();
+        let caps_b: Vec<Capsule> = (0..nb).map(|_| rand_cap(&mut rng)).collect();
+
+        let expected = caps_a.iter().any(|a| caps_b.iter().any(|b| a.collides(b)));
+
+        let mut ca = Collider::<NoPcl>::new();
+        for c in &caps_a {
+            ca.add(*c);
+        }
+        let mut cb = Collider::<NoPcl>::new();
+        for c in &caps_b {
+            cb.add(*c);
+        }
+
+        assert_eq!(ca.collides_other(&cb), expected, "na={na} nb={nb}");
+        assert_eq!(cb.collides_other(&ca), expected, "reversed na={na} nb={nb}");
+    }
+}
+
+// Cylinder SoA-vs-SoA batch (single-type cylinder colliders) must match brute-force all-pairs.
+#[test]
+fn cylinder_collider_soa_batch_matches_bruteforce() {
+    use rand::{Rng, SeedableRng, rngs::SmallRng};
+
+    let mut rng = SmallRng::seed_from_u64(99);
+    let rand_cyl = |rng: &mut SmallRng| {
+        let p1 = Vec3::new(rng.random_range(-3.0..3.0), rng.random_range(-3.0..3.0), rng.random_range(-3.0..3.0));
+        let seg = Vec3::new(rng.random_range(-2.0..2.0), rng.random_range(-2.0..2.0), rng.random_range(-2.0..2.0));
+        Cylinder::new(p1, p1 + seg, rng.random_range(0.1..1.2))
+    };
+
+    for _ in 0..400 {
+        let na = rng.random_range(1..18usize);
+        let nb = rng.random_range(1..18usize);
+        let cyls_a: Vec<Cylinder> = (0..na).map(|_| rand_cyl(&mut rng)).collect();
+        let cyls_b: Vec<Cylinder> = (0..nb).map(|_| rand_cyl(&mut rng)).collect();
+
+        let expected = cyls_a.iter().any(|a| cyls_b.iter().any(|b| a.collides(b)));
+
+        let mut ca = Collider::<NoPcl>::new();
+        for c in &cyls_a {
+            ca.add(*c);
+        }
+        let mut cb = Collider::<NoPcl>::new();
+        for c in &cyls_b {
+            cb.add(*c);
+        }
+
+        assert_eq!(ca.collides_other(&cb), expected, "na={na} nb={nb}");
+        assert_eq!(cb.collides_other(&ca), expected, "reversed na={na} nb={nb}");
+    }
+}
+
+// Every single-type SoA cross pair routes through the cross-matrix batch; each must agree with the
+// brute-force all-pairs scalar narrowphase.
+#[test]
+fn soa_cross_matrix_matches_bruteforce() {
+    use rand::{Rng, SeedableRng, rngs::SmallRng};
+
+    let mut rng = SmallRng::seed_from_u64(555);
+    let v = |rng: &mut SmallRng, s: f32| Vec3::new(rng.random_range(-s..s), rng.random_range(-s..s), rng.random_range(-s..s));
+    let sph = |rng: &mut SmallRng| Sphere::new(v(rng, 3.0), rng.random_range(0.1..1.2));
+    let cap = |rng: &mut SmallRng| { let p = v(rng, 3.0); Capsule::new(p, p + v(rng, 2.0), rng.random_range(0.1..1.0)) };
+    let cyl = |rng: &mut SmallRng| { let p = v(rng, 3.0); Cylinder::new(p, p + v(rng, 2.0), rng.random_range(0.1..1.0)) };
+    let cub = |rng: &mut SmallRng| Cuboid::new(v(rng, 3.0), [Vec3::X, Vec3::Y, Vec3::Z], [rng.random_range(0.2..1.5), rng.random_range(0.2..1.5), rng.random_range(0.2..1.5)]);
+
+    macro_rules! cross {
+        ($ga:expr, $gb:expr) => {{
+            for _ in 0..300 {
+                let na = rng.random_range(1..16usize);
+                let nb = rng.random_range(1..16usize);
+                let a: Vec<_> = (0..na).map(|_| $ga(&mut rng)).collect();
+                let b: Vec<_> = (0..nb).map(|_| $gb(&mut rng)).collect();
+                let expected = a.iter().any(|x| b.iter().any(|y| x.collides(y)));
+                let mut ca = Collider::<NoPcl>::new();
+                for x in &a { ca.add(*x); }
+                let mut cb = Collider::<NoPcl>::new();
+                for y in &b { cb.add(*y); }
+                assert_eq!(ca.collides_other(&cb), expected, "na={na} nb={nb}");
+                assert_eq!(cb.collides_other(&ca), expected, "rev na={na} nb={nb}");
+            }
+        }};
+    }
+
+    cross!(sph, cap);
+    cross!(sph, cub);
+    cross!(sph, cyl);
+    cross!(cap, cub);
+    cross!(cap, cyl);
+    cross!(cyl, cub);
+    cross!(sph, sph);
+    cross!(cub, cub);
+}
