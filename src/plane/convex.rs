@@ -138,11 +138,6 @@ impl ConvexPolygon {
         RefConvexPolygon::from_heap(self)
     }
 
-    #[inline]
-    pub(crate) fn point_dist_sq(&self, point: Vec3) -> f32 {
-        self.as_ref().point_dist_sq(point)
-    }
-
     pub(crate) fn parametric_line_dist_sq(
         &self,
         origin: Vec3,

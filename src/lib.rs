@@ -1,4 +1,9 @@
 #![cfg_attr(not(feature = "std"), no_std)]
+// Under hydroplane-auto's analysis driver's `--cfg hp_analyze` pass, register the tool
+// namespace so the `#[kernel]`-emitted `#[hp_analyze::metrics(..)]` attributes are recognized.
+// Stripped on the ordinary (stable) build, which never sees the cfg.
+#![cfg_attr(hp_analyze, feature(register_tool))]
+#![cfg_attr(hp_analyze, register_tool(hp_analyze))]
 #[cfg(not(any(feature = "std", feature = "libm")))]
 compile_error!("at least one of the `std` or `libm` features must be enabled");
 #[macro_use]
@@ -15,6 +20,7 @@ pub(crate) mod convex_polytope;
 pub(crate) mod line;
 pub(crate) mod plane;
 pub(crate) mod pointcloud;
+pub(crate) mod shape_soa;
 
 mod util;
 pub(crate) use util::*;
@@ -33,7 +39,15 @@ mod valuable_impls;
 
 pub mod soa;
 
+// Kept in the lib (not the bench file) so `build.rs`'s hydroplane-auto pass measures these kernels
+// and `#[kernel]` reads the metrics at expansion — Cargo runs the build script to completion before
+// compiling the lib, so the analysis is always in place first. `pub` only so the bench target, which
+// links this crate externally, can reach them; `doc(hidden)` keeps them out of the public API.
+#[doc(hidden)]
+pub mod bench_kernels;
+
 pub use capsule::Capsule;
+pub use shape_soa::{ShapeSoa, SoaShape};
 pub use convex_polytope::array::ArrayConvexPolytope;
 pub use convex_polytope::heap::ConvexPolytope;
 pub use cuboid::Cuboid;
@@ -298,9 +312,9 @@ impl<const P: usize, const V: usize, PCL: PointCloudMarker> ColliderComponent<PC
 
 #[derive(Debug, Clone)]
 pub struct Collider<PCL: PointCloudMarker = Pointcloud> {
-    capsules: soa::BroadCollection<Capsule>,
-    cuboids: soa::BroadCollection<Cuboid>,
-    cylinders: soa::BroadCollection<Cylinder>,
+    capsules: soa::ShapeCollection<Capsule>,
+    cuboids: soa::ShapeCollection<Cuboid>,
+    cylinders: soa::ShapeCollection<Cylinder>,
     planes: Vec<Plane>,
     polygons: soa::BroadCollection<ConvexPolygon>,
     polytopes: soa::BroadCollection<ConvexPolytope>,
@@ -327,6 +341,74 @@ impl<PCL: PointCloudMarker> Collider<PCL> {
     pub const MASK_RAYS: u16 = 1 << 9;
     pub const MASK_SEGMENTS: u16 = 1 << 10;
     pub const MASK_POINTCLOUDS: u16 = 1 << 11;
+
+    /// The shape types with single-dispatch SoA-vs-SoA batch narrowphases.
+    const SOA_MASK: u16 =
+        Self::MASK_SPHERES | Self::MASK_CAPSULES | Self::MASK_CUBOIDS | Self::MASK_CYLINDERS;
+
+    /// True when `mask` holds only SoA-batchable types, so [`soa_cross_collides`](Self::soa_cross_collides)
+    /// covers every possible pair and the per-query fallback can be skipped.
+    #[inline]
+    fn all_soa(mask: u16) -> bool {
+        mask & !Self::SOA_MASK == 0
+    }
+
+    /// The full SoA cross-matrix: for two colliders that hold only SoA types, OR together one
+    /// single-dispatch batch per present (self-type, other-type) pair — one ISA dispatch per pair
+    /// instead of one per query shape. Cuboid-vs-cuboid stays on the density-gated per-query scalar
+    /// path (its cheap SAT early-out beats the SIMD batch for small sparse sets).
+    fn soa_cross_collides(&self, other: &Self) -> bool {
+        use soa::batch;
+        let (s, o) = (self.mask, other.mask);
+        (s & Self::MASK_SPHERES != 0
+            && o & Self::MASK_SPHERES != 0
+            && self.spheres.any_collides_soa(&other.spheres))
+            || (s & Self::MASK_SPHERES != 0
+                && o & Self::MASK_CAPSULES != 0
+                && batch::spheres_vs_capsules_soa(&self.spheres, &other.capsules))
+            || (s & Self::MASK_SPHERES != 0
+                && o & Self::MASK_CUBOIDS != 0
+                && batch::spheres_vs_cuboids_soa(&self.spheres, &other.cuboids))
+            || (s & Self::MASK_SPHERES != 0
+                && o & Self::MASK_CYLINDERS != 0
+                && batch::spheres_vs_cylinders_soa(&self.spheres, &other.cylinders))
+            || (s & Self::MASK_CAPSULES != 0
+                && o & Self::MASK_SPHERES != 0
+                && batch::spheres_vs_capsules_soa(&other.spheres, &self.capsules))
+            || (s & Self::MASK_CAPSULES != 0
+                && o & Self::MASK_CAPSULES != 0
+                && batch::capsules_vs_capsules_soa(&self.capsules, &other.capsules))
+            || (s & Self::MASK_CAPSULES != 0
+                && o & Self::MASK_CUBOIDS != 0
+                && batch::capsules_vs_cuboids_soa(&self.capsules, &other.cuboids))
+            || (s & Self::MASK_CAPSULES != 0
+                && o & Self::MASK_CYLINDERS != 0
+                && batch::capsules_vs_cylinders_soa(&self.capsules, &other.cylinders))
+            || (s & Self::MASK_CUBOIDS != 0
+                && o & Self::MASK_SPHERES != 0
+                && batch::spheres_vs_cuboids_soa(&other.spheres, &self.cuboids))
+            || (s & Self::MASK_CUBOIDS != 0
+                && o & Self::MASK_CAPSULES != 0
+                && batch::capsules_vs_cuboids_soa(&other.capsules, &self.cuboids))
+            || (s & Self::MASK_CUBOIDS != 0
+                && o & Self::MASK_CUBOIDS != 0
+                && other.cuboids.iter().any(|x| batch::cuboid_vs_cuboids_broad(&x, &self.cuboids)))
+            || (s & Self::MASK_CUBOIDS != 0
+                && o & Self::MASK_CYLINDERS != 0
+                && batch::cylinders_vs_cuboids_soa(&other.cylinders, &self.cuboids))
+            || (s & Self::MASK_CYLINDERS != 0
+                && o & Self::MASK_SPHERES != 0
+                && batch::spheres_vs_cylinders_soa(&other.spheres, &self.cylinders))
+            || (s & Self::MASK_CYLINDERS != 0
+                && o & Self::MASK_CAPSULES != 0
+                && batch::capsules_vs_cylinders_soa(&other.capsules, &self.cylinders))
+            || (s & Self::MASK_CYLINDERS != 0
+                && o & Self::MASK_CUBOIDS != 0
+                && batch::cylinders_vs_cuboids_soa(&self.cylinders, &other.cuboids))
+            || (s & Self::MASK_CYLINDERS != 0
+                && o & Self::MASK_CYLINDERS != 0
+                && batch::cylinders_vs_cylinders_soa(&self.cylinders, &other.cylinders))
+    }
 
     pub fn mask(&self) -> u16 {
         self.mask
@@ -686,7 +768,7 @@ impl Stretchable for Collider<NoPcl> {
             }
         }
 
-        for capsule in &self.capsules {
+        for capsule in self.capsules.iter() {
             match capsule.stretch(translation) {
                 capsule::CapsuleStretch::Aligned(c) => out.capsules.push(c),
                 capsule::CapsuleStretch::Unaligned(edges, poly) => {
@@ -696,14 +778,14 @@ impl Stretchable for Collider<NoPcl> {
             }
         }
 
-        for cuboid in &self.cuboids {
+        for cuboid in self.cuboids.iter() {
             match cuboid.stretch(translation) {
                 cuboid::CuboidStretch::Aligned(c) => out.cuboids.push(c),
                 cuboid::CuboidStretch::Unaligned(p) => out.polytopes.push(p),
             }
         }
 
-        for cylinder in &self.cylinders {
+        for cylinder in self.cylinders.iter() {
             match cylinder.stretch(translation) {
                 cylinder::CylinderStretch::Aligned(c) => out.cylinders.push(c),
                 cylinder::CylinderStretch::Unaligned(edges, poly) => {
@@ -816,9 +898,9 @@ impl<PCL: PointCloudMarker> Collider<PCL> {
             pointcloud_len += c.pointclouds.len();
         }
 
-        let mut capsules = soa::BroadCollection::with_capacity(capsule_len);
-        let mut cuboids = soa::BroadCollection::with_capacity(cuboid_len);
-        let mut cylinders = soa::BroadCollection::with_capacity(cylinder_len);
+        let mut capsules = soa::ShapeCollection::with_capacity(capsule_len);
+        let mut cuboids = soa::ShapeCollection::with_capacity(cuboid_len);
+        let mut cylinders = soa::ShapeCollection::with_capacity(cylinder_len);
         let mut planes = Vec::with_capacity(plane_len);
         let mut polygons = soa::BroadCollection::with_capacity(polygon_len);
         let mut polytopes = soa::BroadCollection::with_capacity(polytope_len);
@@ -830,9 +912,9 @@ impl<PCL: PointCloudMarker> Collider<PCL> {
         let mut pointclouds = soa::BroadCollection::with_capacity(pointcloud_len);
 
         for c in colliders {
-            capsules.extend_from_slice(c.capsules.items());
-            cuboids.extend_from_slice(c.cuboids.items());
-            cylinders.extend_from_slice(c.cylinders.items());
+            capsules.extend(c.capsules.iter());
+            cuboids.extend(c.cuboids.iter());
+            cylinders.extend(c.cylinders.iter());
             planes.extend_from_slice(&c.planes);
             polygons.extend_from_slice(c.polygons.items());
             polytopes.extend_from_slice(c.polytopes.items());
@@ -1057,14 +1139,14 @@ impl<PCL: PointCloudMarker> Collider<PCL> {
                 && self.pointclouds.broad.any_collides_sphere(query))
     }
 
-    pub fn capsules(&self) -> &[Capsule] {
-        self.capsules.items()
+    pub fn capsules(&self) -> Vec<Capsule> {
+        self.capsules.to_vec()
     }
-    pub fn cuboids(&self) -> &[Cuboid] {
-        self.cuboids.items()
+    pub fn cuboids(&self) -> Vec<Cuboid> {
+        self.cuboids.to_vec()
     }
-    pub fn cylinders(&self) -> &[Cylinder] {
-        self.cylinders.items()
+    pub fn cylinders(&self) -> Vec<Cylinder> {
+        self.cylinders.to_vec()
     }
     pub fn planes(&self) -> &[Plane] {
         &self.planes
@@ -1228,9 +1310,9 @@ where
         #[derive(serde::Deserialize)]
         #[serde(bound = "P: PointCloudMarker + serde::Deserialize<'de>")]
         struct ColliderHelper<P: PointCloudMarker> {
-            capsules: soa::BroadCollection<Capsule>,
-            cuboids: soa::BroadCollection<Cuboid>,
-            cylinders: soa::BroadCollection<Cylinder>,
+            capsules: soa::ShapeCollection<Capsule>,
+            cuboids: soa::ShapeCollection<Cuboid>,
+            cylinders: soa::ShapeCollection<Cylinder>,
             planes: Vec<Plane>,
             polygons: soa::BroadCollection<ConvexPolygon>,
             polytopes: soa::BroadCollection<ConvexPolytope>,
@@ -1349,9 +1431,105 @@ macro_rules! impl_collider_query_generic {
     };
 }
 
-impl_collider_query_generic!(Capsule, soa::batch::capsule_vs_spheres_soa);
-impl_collider_query_generic!(Cuboid, soa::batch::cuboid_vs_spheres_soa);
-impl_collider_query_generic!(Cylinder, soa::batch::cylinder_vs_spheres_soa);
+macro_rules! impl_capsule_query {
+    ($pcl:ty) => {
+        impl ColliderQuery<$pcl> for Capsule {
+            fn query_collider(&self, c: &Collider<$pcl>) -> bool {
+                if c.mask == 0 {
+                    return false;
+                }
+                (c.mask & Collider::<$pcl>::MASK_SPHERES != 0
+                    && soa::batch::capsule_vs_spheres_soa(self, &c.spheres))
+                    || (c.mask & Collider::<$pcl>::MASK_CAPSULES != 0
+                        && soa::batch::capsule_vs_capsules_broad(self, &c.capsules))
+                    || (c.mask & Collider::<$pcl>::MASK_POINTS != 0 && c.points.collides(self))
+                    || (c.mask & Collider::<$pcl>::MASK_CUBOIDS != 0
+                        && soa::batch::capsule_vs_cuboids_broad(self, &c.cuboids))
+                    || (c.mask & Collider::<$pcl>::MASK_CYLINDERS != 0
+                        && soa::batch::capsule_vs_cylinders_broad(self, &c.cylinders))
+                    || (c.mask & Collider::<$pcl>::MASK_SEGMENTS != 0 && c.segments.collides(self))
+                    || (c.mask & Collider::<$pcl>::MASK_POLYGONS != 0 && c.polygons.collides(self))
+                    || (c.mask & Collider::<$pcl>::MASK_POLYTOPES != 0 && c.polytopes.collides(self))
+                    || (c.mask & Collider::<$pcl>::MASK_PLANES != 0
+                        && c.planes.iter().any(|x| self.collides(x)))
+                    || (c.mask & Collider::<$pcl>::MASK_LINES != 0
+                        && c.lines.iter().any(|x| self.collides(x)))
+                    || (c.mask & Collider::<$pcl>::MASK_RAYS != 0
+                        && c.rays.iter().any(|x| self.collides(x)))
+                    || (c.mask & Collider::<$pcl>::MASK_POINTCLOUDS != 0
+                        && c.pointclouds.collides(self))
+            }
+        }
+    };
+}
+impl_capsule_query!(NoPcl);
+impl_capsule_query!(Pointcloud);
+macro_rules! impl_cuboid_query {
+    ($pcl:ty) => {
+        impl ColliderQuery<$pcl> for Cuboid {
+            fn query_collider(&self, c: &Collider<$pcl>) -> bool {
+                if c.mask == 0 {
+                    return false;
+                }
+                (c.mask & Collider::<$pcl>::MASK_SPHERES != 0
+                    && soa::batch::cuboid_vs_spheres_soa(self, &c.spheres))
+                    || (c.mask & Collider::<$pcl>::MASK_CUBOIDS != 0
+                        && soa::batch::cuboid_vs_cuboids_broad(self, &c.cuboids))
+                    || (c.mask & Collider::<$pcl>::MASK_POINTS != 0 && c.points.collides(self))
+                    || (c.mask & Collider::<$pcl>::MASK_CAPSULES != 0
+                        && soa::batch::cuboid_vs_capsules_broad(self, &c.capsules))
+                    || (c.mask & Collider::<$pcl>::MASK_CYLINDERS != 0
+                        && soa::batch::cuboid_vs_cylinders_broad(self, &c.cylinders))
+                    || (c.mask & Collider::<$pcl>::MASK_SEGMENTS != 0 && c.segments.collides(self))
+                    || (c.mask & Collider::<$pcl>::MASK_POLYGONS != 0 && c.polygons.collides(self))
+                    || (c.mask & Collider::<$pcl>::MASK_POLYTOPES != 0 && c.polytopes.collides(self))
+                    || (c.mask & Collider::<$pcl>::MASK_PLANES != 0
+                        && c.planes.iter().any(|x| self.collides(x)))
+                    || (c.mask & Collider::<$pcl>::MASK_LINES != 0
+                        && c.lines.iter().any(|x| self.collides(x)))
+                    || (c.mask & Collider::<$pcl>::MASK_RAYS != 0
+                        && c.rays.iter().any(|x| self.collides(x)))
+                    || (c.mask & Collider::<$pcl>::MASK_POINTCLOUDS != 0
+                        && c.pointclouds.collides(self))
+            }
+        }
+    };
+}
+impl_cuboid_query!(NoPcl);
+impl_cuboid_query!(Pointcloud);
+macro_rules! impl_cylinder_query {
+    ($pcl:ty) => {
+        impl ColliderQuery<$pcl> for Cylinder {
+            fn query_collider(&self, c: &Collider<$pcl>) -> bool {
+                if c.mask == 0 {
+                    return false;
+                }
+                (c.mask & Collider::<$pcl>::MASK_SPHERES != 0
+                    && soa::batch::cylinder_vs_spheres_soa(self, &c.spheres))
+                    || (c.mask & Collider::<$pcl>::MASK_CYLINDERS != 0
+                        && soa::batch::cylinder_vs_cylinders_broad(self, &c.cylinders))
+                    || (c.mask & Collider::<$pcl>::MASK_POINTS != 0 && c.points.collides(self))
+                    || (c.mask & Collider::<$pcl>::MASK_CAPSULES != 0
+                        && soa::batch::cylinder_vs_capsules_broad(self, &c.capsules))
+                    || (c.mask & Collider::<$pcl>::MASK_CUBOIDS != 0
+                        && soa::batch::cylinder_vs_cuboids_broad(self, &c.cuboids))
+                    || (c.mask & Collider::<$pcl>::MASK_SEGMENTS != 0 && c.segments.collides(self))
+                    || (c.mask & Collider::<$pcl>::MASK_POLYGONS != 0 && c.polygons.collides(self))
+                    || (c.mask & Collider::<$pcl>::MASK_POLYTOPES != 0 && c.polytopes.collides(self))
+                    || (c.mask & Collider::<$pcl>::MASK_PLANES != 0
+                        && c.planes.iter().any(|x| self.collides(x)))
+                    || (c.mask & Collider::<$pcl>::MASK_LINES != 0
+                        && c.lines.iter().any(|x| self.collides(x)))
+                    || (c.mask & Collider::<$pcl>::MASK_RAYS != 0
+                        && c.rays.iter().any(|x| self.collides(x)))
+                    || (c.mask & Collider::<$pcl>::MASK_POINTCLOUDS != 0
+                        && c.pointclouds.collides(self))
+            }
+        }
+    };
+}
+impl_cylinder_query!(NoPcl);
+impl_cylinder_query!(Pointcloud);
 impl_collider_query_generic!(ConvexPolygon, scalar_vs_spheres_soa::<ConvexPolygon>);
 impl_collider_query_generic!(ConvexPolytope, scalar_vs_spheres_soa::<ConvexPolytope>);
 /// Point: broadphase-only for spheres and points (zero-radius sphere check).
@@ -1475,11 +1653,11 @@ macro_rules! impl_collider_query_line_like {
                 }
                 (c.mask & Collider::<$pcl>::MASK_SPHERES != 0 && $batch_fn(self, &c.spheres))
                     || (c.mask & Collider::<$pcl>::MASK_CAPSULES != 0
-                        && c.capsules.iter().any(|x| self.collides(x)))
+                        && c.capsules.iter().any(|x| self.collides(&x)))
                     || (c.mask & Collider::<$pcl>::MASK_CUBOIDS != 0
-                        && c.cuboids.iter().any(|x| self.collides(x)))
+                        && c.cuboids.iter().any(|x| self.collides(&x)))
                     || (c.mask & Collider::<$pcl>::MASK_CYLINDERS != 0
-                        && c.cylinders.iter().any(|x| self.collides(x)))
+                        && c.cylinders.iter().any(|x| self.collides(&x)))
                     || (c.mask & Collider::<$pcl>::MASK_SEGMENTS != 0
                         && c.segments.iter().any(|x| self.collides(x)))
                     || (c.mask & Collider::<$pcl>::MASK_POLYGONS != 0
@@ -1600,17 +1778,24 @@ macro_rules! impl_collider_collides_other {
                     return false;
                 }
 
+                if single_type(self.mask)
+                    && single_type(other.mask)
+                    && Self::all_soa(self.mask)
+                    && Self::all_soa(other.mask)
+                {
+                    return self.soa_cross_collides(other);
+                }
                 (other.mask & Self::MASK_SPHERES != 0
                     && (self.spheres.any_collides_soa(&other.spheres)
                         || other.spheres.iter().any(|x| self.collides(&x))))
                     || (other.mask & Self::MASK_POINTS != 0
                         && other.points.iter().any(|x| self.collides(x)))
                     || (other.mask & Self::MASK_CAPSULES != 0
-                        && other.capsules.iter().any(|x| self.collides(x)))
+                        && other.capsules.iter().any(|x| self.collides(&x)))
                     || (other.mask & Self::MASK_CUBOIDS != 0
-                        && other.cuboids.iter().any(|x| self.collides(x)))
+                        && other.cuboids.iter().any(|x| self.collides(&x)))
                     || (other.mask & Self::MASK_CYLINDERS != 0
-                        && other.cylinders.iter().any(|x| self.collides(x)))
+                        && other.cylinders.iter().any(|x| self.collides(&x)))
                     || (other.mask & Self::MASK_SEGMENTS != 0
                         && other.segments.iter().any(|x| self.collides(x)))
                     || (other.mask & Self::MASK_POLYGONS != 0
@@ -1647,17 +1832,24 @@ impl Collider<Pointcloud> {
             return false;
         }
 
+        if single_type(self.mask)
+            && single_type(other.mask)
+            && Self::all_soa(self.mask)
+            && Self::all_soa(other.mask)
+        {
+            return self.soa_cross_collides(other);
+        }
         (other.mask & Self::MASK_SPHERES != 0
             && (self.spheres.any_collides_soa(&other.spheres)
                 || other.spheres.iter().any(|x| self.collides(&x))))
             || (other.mask & Self::MASK_POINTS != 0
                 && other.points.iter().any(|x| self.collides(x)))
             || (other.mask & Self::MASK_CAPSULES != 0
-                && other.capsules.iter().any(|x| self.collides(x)))
+                && other.capsules.iter().any(|x| self.collides(&x)))
             || (other.mask & Self::MASK_CUBOIDS != 0
-                && other.cuboids.iter().any(|x| self.collides(x)))
+                && other.cuboids.iter().any(|x| self.collides(&x)))
             || (other.mask & Self::MASK_CYLINDERS != 0
-                && other.cylinders.iter().any(|x| self.collides(x)))
+                && other.cylinders.iter().any(|x| self.collides(&x)))
             || (other.mask & Self::MASK_SEGMENTS != 0
                 && other.segments.iter().any(|x| self.collides(x)))
             || (other.mask & Self::MASK_POLYGONS != 0

@@ -1,5 +1,7 @@
 use core::fmt::Debug;
 
+use hydroplane::{Gang, kernel};
+
 use crate::capsule::Capsule;
 use crate::convex_polytope::heap::ConvexPolytope;
 use crate::cuboid::Cuboid;
@@ -7,7 +9,8 @@ use crate::cylinder::Cylinder;
 use crate::plane::{ConvexPolygon, Plane};
 use crate::point::Point;
 use crate::pointcloud::{NoPcl, Pointcloud, PointCloudMarker};
-use crate::soa::{BroadCollection, SpheresSoA};
+use crate::shape_soa::SoaShape;
+use crate::soa::{BroadCollection, ShapeCollection, SpheresSoA};
 use crate::sphere::Sphere;
 use crate::{Bounded, Collider, Scalable, Transformable};
 use approx::{AbsDiffEq, RelativeEq};
@@ -418,36 +421,46 @@ impl AbsDiffEq for SpheresSoA {
     }
 
     fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
-        use wide::{CmpLe, f32x8};
-
         if self.len() != other.len() {
             return false;
         }
-        let n = self.len();
-        let simd_n = n & !7;
-        let eps = f32x8::splat(epsilon);
-        let pairs = [
-            (self.x(), other.x()),
-            (self.y(), other.y()),
-            (self.z(), other.z()),
-            (self.r(), other.r()),
-        ];
-        for (sa, sb) in pairs {
-            for i in (0..simd_n).step_by(8) {
-                let a = f32x8::new(sa[i..i + 8].try_into().unwrap());
-                let b = f32x8::new(sb[i..i + 8].try_into().unwrap());
-                if !(a - b).abs().simd_le(eps).all() {
-                    return false;
-                }
-            }
-            for i in simd_n..n {
-                if (sa[i] - sb[i]).abs() > epsilon {
-                    return false;
-                }
-            }
-        }
-        true
+        soa_abs_diff_eq_k(
+            self.x(),
+            other.x(),
+            self.y(),
+            other.y(),
+            self.z(),
+            other.z(),
+            self.r(),
+            other.r(),
+            epsilon,
+        )
     }
+}
+
+/// `|a - b| ≤ eps` lane-wise across all four columns. Inactive tail lanes are forced to pass
+/// by `all_n`, so a short final register cannot spuriously fail.
+#[kernel]
+#[allow(clippy::too_many_arguments)]
+fn soa_abs_diff_eq_k<'a>(
+    ctx: Gang,
+    ax: &'a [f32],
+    bx: &'a [f32],
+    ay: &'a [f32],
+    by: &'a [f32],
+    az: &'a [f32],
+    bz: &'a [f32],
+    ar: &'a [f32],
+    br: &'a [f32],
+    eps: f32,
+) -> bool {
+    let e = ctx.splat(eps);
+    ctx.all_n([ax, bx, ay, by, az, bz, ar, br], |[ax, bx, ay, by, az, bz, ar, br]| {
+        (ax - bx).abs().le(e)
+            & (ay - by).abs().le(e)
+            & (az - bz).abs().le(e)
+            & (ar - br).abs().le(e)
+    })
 }
 
 impl RelativeEq for SpheresSoA {
@@ -461,41 +474,49 @@ impl RelativeEq for SpheresSoA {
         epsilon: Self::Epsilon,
         max_relative: Self::Epsilon,
     ) -> bool {
-        use wide::{CmpLe, f32x8};
-
         if self.len() != other.len() {
             return false;
         }
-        let n = self.len();
-        let simd_n = n & !7;
-        let eps = f32x8::splat(epsilon);
-        let max_rel = f32x8::splat(max_relative);
-        let pairs = [
-            (self.x(), other.x()),
-            (self.y(), other.y()),
-            (self.z(), other.z()),
-            (self.r(), other.r()),
-        ];
-        for (sa, sb) in pairs {
-            for i in (0..simd_n).step_by(8) {
-                let a = f32x8::new(sa[i..i + 8].try_into().unwrap());
-                let b = f32x8::new(sb[i..i + 8].try_into().unwrap());
-                let diff = (a - b).abs();
-                let tol = eps.max(a.abs().max(b.abs()) * max_rel);
-                if !diff.simd_le(tol).all() {
-                    return false;
-                }
-            }
-            for i in simd_n..n {
-                let a = sa[i];
-                let b = sb[i];
-                if !f32::relative_eq(&a, &b, epsilon, max_relative) {
-                    return false;
-                }
-            }
-        }
-        true
+        soa_relative_eq_k(
+            self.x(),
+            other.x(),
+            self.y(),
+            other.y(),
+            self.z(),
+            other.z(),
+            self.r(),
+            other.r(),
+            epsilon,
+            max_relative,
+        )
     }
+}
+
+/// `|a - b| ≤ max(eps, max(|a|, |b|)·max_rel)` lane-wise across all four columns. Inactive tail
+/// lanes are forced to pass by `all_n`.
+#[kernel]
+#[allow(clippy::too_many_arguments)]
+fn soa_relative_eq_k<'a>(
+    ctx: Gang,
+    ax: &'a [f32],
+    bx: &'a [f32],
+    ay: &'a [f32],
+    by: &'a [f32],
+    az: &'a [f32],
+    bz: &'a [f32],
+    ar: &'a [f32],
+    br: &'a [f32],
+    eps: f32,
+    max_rel: f32,
+) -> bool {
+    let e = ctx.splat(eps);
+    ctx.all_n([ax, bx, ay, by, az, bz, ar, br], |[ax, bx, ay, by, az, bz, ar, br]| {
+        let mx = (ax - bx).abs().le(e.max(ax.abs().max(bx.abs()) * max_rel));
+        let my = (ay - by).abs().le(e.max(ay.abs().max(by.abs()) * max_rel));
+        let mz = (az - bz).abs().le(e.max(az.abs().max(bz.abs()) * max_rel));
+        let mr = (ar - br).abs().le(e.max(ar.abs().max(br.abs()) * max_rel));
+        mx & my & mz & mr
+    })
 }
 
 impl<T> AbsDiffEq for BroadCollection<T>
@@ -527,6 +548,34 @@ where
         epsilon: Self::Epsilon,
         max_relative: Self::Epsilon,
     ) -> bool {
+        self.broad.relative_eq(&other.broad, epsilon, max_relative)
+    }
+}
+
+impl<S> AbsDiffEq for ShapeCollection<S>
+where
+    S: SoaShape + Bounded + Transformable + Scalable + Debug + PartialEq,
+{
+    type Epsilon = f32;
+
+    fn default_epsilon() -> Self::Epsilon {
+        f32::default_epsilon()
+    }
+
+    fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
+        self.broad.abs_diff_eq(&other.broad, epsilon)
+    }
+}
+
+impl<S> RelativeEq for ShapeCollection<S>
+where
+    S: SoaShape + Bounded + Transformable + Scalable + Debug + PartialEq,
+{
+    fn default_max_relative() -> Self::Epsilon {
+        f32::default_max_relative()
+    }
+
+    fn relative_eq(&self, other: &Self, epsilon: Self::Epsilon, max_relative: Self::Epsilon) -> bool {
         self.broad.relative_eq(&other.broad, epsilon, max_relative)
     }
 }

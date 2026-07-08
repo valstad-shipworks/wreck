@@ -5,7 +5,7 @@ use core::fmt;
 use crate::F32Ext;
 
 use glam::{DMat3, DVec3, Vec3};
-use wide::{CmpLe, f32x8};
+use hydroplane::{Gang, GangGlamExt, kernel};
 
 use inherent::inherent;
 
@@ -349,7 +349,7 @@ fn capsule_cuboid_za_aa(capsule: &Capsule, cuboid: &Cuboid) -> bool {
 
 // Capsule-Cuboid collision
 // Evaluate all 8 candidate t-values (2 endpoints + 6 face-plane intersections)
-// in a single SIMD pass using f32x8.
+// in a single SIMD pass.
 #[inline]
 fn capsule_cuboid_collides<const BROADPHASE: bool>(capsule: &Capsule, cuboid: &Cuboid) -> bool {
     // Bounding sphere early-out
@@ -393,7 +393,7 @@ fn capsule_cuboid_collides<const BROADPHASE: bool>(capsule: &Capsule, cuboid: &C
     let he = cuboid.half_extents;
 
     // Compute 6 critical t-values where capsule axis meets cuboid face planes,
-    // plus 2 endpoints. Pack all 8 into f32x8.
+    // plus 2 endpoints, for 8 candidate samples.
     // t_i = (±he[i] - p0[i]) / dir[i], clamped to [0,1]
     // For near-zero dir components, the division gives ±inf which clamps to 0 or 1.
     let inv_dir = [
@@ -414,7 +414,7 @@ fn capsule_cuboid_collides<const BROADPHASE: bool>(capsule: &Capsule, cuboid: &C
         },
     ];
 
-    let ts = f32x8::new([
+    let ts = [
         0.0,
         1.0,
         ((-he[0] - p0[0]) * inv_dir[0]).clamp(0.0, 1.0),
@@ -423,22 +423,34 @@ fn capsule_cuboid_collides<const BROADPHASE: bool>(capsule: &Capsule, cuboid: &C
         ((he[1] - p0[1]) * inv_dir[1]).clamp(0.0, 1.0),
         ((-he[2] - p0[2]) * inv_dir[2]).clamp(0.0, 1.0),
         ((he[2] - p0[2]) * inv_dir[2]).clamp(0.0, 1.0),
-    ]);
+    ];
 
-    // Evaluate squared distance from capsule-axis point at each t to cuboid, branchless.
-    // For each axis: excess = max(0, |p0[i] + dir[i]*t| - he[i])
-    let zero = f32x8::splat(0.0);
-    let mut dist_sq = zero;
+    capsule_cuboid_eval(ts, Vec3::from(p0), Vec3::from(dir), Vec3::from(he), rs_sq)
+}
 
-    for i in 0..3 {
-        let pos = f32x8::splat(p0[i]) + f32x8::splat(dir[i]) * ts;
-        let abs_pos = pos.max(-pos); // branchless abs
-        let excess = (abs_pos - f32x8::splat(he[i])).max(zero);
-        dist_sq = dist_sq + excess * excess;
+/// Squared distance from the capsule axis (sampled at the 8 candidate `t`s) to the
+/// cuboid, branchless: `excess = max(0, |p0 + dir·t| - he)` per axis. A hit if any sample
+/// lies within the capsule radius. An explicit `lane < cnt` mask drops the inactive tail
+/// lanes a wider backend may add.
+#[kernel]
+pub(crate) fn capsule_cuboid_eval(ctx: Gang, ts: [f32; 8], p0: Vec3, dir: Vec3, he: Vec3, rs_sq: f32) -> bool {
+    let rs = ctx.splat(rs_sq);
+    let zero = ctx.splat(0.0);
+    let p0v = ctx.splat_vec3(p0);
+    let dv = ctx.splat_vec3(dir);
+    let [hx, hy, hz] = ctx.splat_vec3(he).0;
+    for (off, cnt, active) in ctx.masked_chunks::<f32>(8) {
+        let t = ctx.load_partial(&ts[off..off + cnt], 0.0);
+        let [px, py, pz] = p0v.add_scaled(dv, t).0;
+        let ex = (px.abs() - hx).max(zero);
+        let ey = (py.abs() - hy).max(zero);
+        let ez = (pz.abs() - hz).max(zero);
+        let dist_sq = ex * ex + ey * ey + ez * ez;
+        if (dist_sq.le(rs) & active).any() {
+            return true;
+        }
     }
-
-    // Check if any of the 8 evaluations is within capsule radius
-    dist_sq.simd_le(f32x8::splat(rs_sq)).any()
+    false
 }
 
 impl Collides<Cuboid> for Capsule {
@@ -641,26 +653,25 @@ impl Stretchable for Cuboid {
             }
         }
 
-        // Plane normals: 6 original face normals + up to 6 side normals from edge×translation
-        let mut normals: Vec<Vec3> = Vec::with_capacity(12);
+        // Plane normals: 6 original face normals + up to 6 side normals from edge×translation.
+        // All come in ± pairs, so only the positive orientation is projected; one fused min/max
+        // sweep per direction yields both plane offsets.
+        let mut base: Vec<Vec3> = Vec::with_capacity(6);
         for i in 0..3 {
-            normals.push(ax[i]);
-            normals.push(-ax[i]);
+            base.push(ax[i]);
             let side = ax[i].cross(translation);
             if side.length_squared() > 1e-10 {
-                let side_n = side.normalize();
-                normals.push(side_n);
-                normals.push(-side_n);
+                base.push(side.normalize());
             }
         }
 
-        let planes: Vec<(Vec3, f32)> = normals
-            .into_iter()
-            .map(|n| {
-                let d = crate::convex_polytope::max_projection(&vertices, n);
-                (n, d)
-            })
-            .collect();
+        let mut mm = [(0.0f32, 0.0f32); 6];
+        crate::convex_polytope::minmax_projections_k(&vertices, &base, &mut mm[..base.len()]);
+        let mut planes: Vec<(Vec3, f32)> = Vec::with_capacity(base.len() * 2);
+        for (&bn, &(lo, hi)) in base.iter().zip(&mm) {
+            planes.push((bn, hi));
+            planes.push((-bn, -lo));
+        }
 
         // Derive OBB analytically: same axes, extended extents
         let mut obb = *self;

@@ -5,7 +5,7 @@ use core::fmt;
 use crate::F32Ext;
 
 use glam::{DMat3, DVec3, Vec3};
-use wide::{CmpLe, f32x8};
+use hydroplane::{Gang, GangGlamExt, kernel};
 
 use inherent::inherent;
 
@@ -308,8 +308,6 @@ fn cylinder_capsule_collides<const BROADPHASE: bool>(cyl: &Cylinder, capsule: &C
         }
     }
 
-    let cr_sq = capsule.radius * capsule.radius;
-
     // Compute key s-values on the capsule axis
     // s_closest: closest approach between the two axis segments
     let r = capsule.p1 - cyl.p1;
@@ -352,65 +350,69 @@ fn cylinder_capsule_collides<const BROADPHASE: bool>(cyl: &Cylinder, capsule: &C
         (0.0, 1.0)
     };
 
-    let samples = f32x8::new([0.0, 1.0, s_closest, s_t0, s_t1, 0.25, 0.5, 0.75]);
+    let samples = [0.0, 1.0, s_closest, s_t0, s_t1, 0.25, 0.5, 0.75];
 
-    // Evaluate point_dist_sq at each sample on capsule axis
-    // p(s) = capsule.p1 + s * capsule.dir
-    let px = f32x8::splat(capsule.p1.x) + f32x8::splat(capsule.dir.x) * samples;
-    let py = f32x8::splat(capsule.p1.y) + f32x8::splat(capsule.dir.y) * samples;
-    let pz = f32x8::splat(capsule.p1.z) + f32x8::splat(capsule.dir.z) * samples;
+    cylinder_capsule_eval(samples, capsule.p1, capsule.dir, cyl.p1, cyl.dir, cyl.rdv, cyl.radius, capsule.radius, e)
+}
 
-    // w = p - cyl.p1
-    let wx = px - f32x8::splat(cyl.p1.x);
-    let wy = py - f32x8::splat(cyl.p1.y);
-    let wz = pz - f32x8::splat(cyl.p1.z);
-
-    let cdx = f32x8::splat(cyl.dir.x);
-    let cdy = f32x8::splat(cyl.dir.y);
-    let cdz = f32x8::splat(cyl.dir.z);
-    let crdv = f32x8::splat(cyl.rdv);
-
-    // t = w · cyl.dir * rdv
-    let t = (wx * cdx + wy * cdy + wz * cdz) * crdv;
-    let zero = f32x8::splat(0.0);
-    let one = f32x8::splat(1.0);
-    let t_c = t.max(zero).min(one);
-
-    // perp = w - t * cyl.dir (using unclamped t for perpendicular distance)
-    let perpx = wx - cdx * t;
-    let perpy = wy - cdy * t;
-    let perpz = wz - cdz * t;
-    let r_sq = perpx * perpx + perpy * perpy + perpz * perpz;
-
-    // d_axial_sq = (t - t_c)^2 * |cyl.dir|^2
-    let t_excess = t - t_c;
-    let dir_sq = f32x8::splat(e);
-    let d_axial_sq = t_excess * t_excess * dir_sq;
-
-    let cyl_r = f32x8::splat(cyl.radius);
+/// Evaluate the cylinder distance at 8 samples along the capsule axis (barrel + both
+/// end-cap regions, sqrt-free). A `lane < cnt` mask removes the inactive tail lanes a
+/// wider backend may add.
+#[kernel]
+#[allow(clippy::too_many_arguments)]
+fn cylinder_capsule_eval(
+    ctx: Gang,
+    samples: [f32; 8],
+    cap_p1: Vec3,
+    cap_dir: Vec3,
+    cyl_p1: Vec3,
+    cyl_dir: Vec3,
+    rdv: f32,
+    cyl_radius: f32,
+    cap_radius: f32,
+    dir_sq_s: f32,
+) -> bool {
+    let zero = ctx.splat(0.0);
+    let one = ctx.splat(1.0);
+    let cyl_r = ctx.splat(cyl_radius);
     let cyl_r_sq = cyl_r * cyl_r;
-    let cap_r_sq = f32x8::splat(cr_sq);
+    let cap_r_sq = ctx.splat(cap_radius * cap_radius);
+    let dir_sq = ctx.splat(dir_sq_s);
+    let p1v = ctx.splat_vec3(cap_p1);
+    let dv = ctx.splat_vec3(cap_dir);
+    let cp1v = ctx.splat_vec3(cyl_p1);
+    let cdv = ctx.splat_vec3(cyl_dir);
 
-    // Barrel check: t in [0,1] and r_sq <= (cyl.radius + capsule.radius)^2
-    let in_barrel = t.simd_le(one) & t.simd_le(one.max(t)) & zero.simd_le(t);
-    let combined = cyl_r + f32x8::splat(capsule.radius);
-    let barrel_hit = in_barrel & r_sq.simd_le(combined * combined);
+    for (off, cnt, active) in ctx.masked_chunks::<f32>(8) {
+        let s = ctx.load_partial(&samples[off..off + cnt], 0.0);
 
-    // End cap, radially inside: d_axial_sq <= capsule.radius^2
-    let inside_r = r_sq.simd_le(cyl_r_sq);
-    let endcap_inside = inside_r & d_axial_sq.simd_le(cap_r_sq);
+        let w = p1v.add_scaled(dv, s) - cp1v;
 
-    // End cap, radially outside: sqrt-free algebraic check
-    // (r - R)^2 + d_axial_sq <= cap_r_sq
-    // r_sq + R^2 + d_axial_sq - cap_r_sq <= 2*r*R
-    // Let L = r_sq + R^2 + d_axial_sq - cap_r_sq
-    // L <= 0 OR L^2 <= 4*R^2*r_sq
-    let l = r_sq + cyl_r_sq + d_axial_sq - cap_r_sq;
-    let four_r_sq = f32x8::splat(4.0) * cyl_r_sq;
-    let endcap_outside = l.simd_le(zero) | (l * l).simd_le(four_r_sq * r_sq);
+        let t = w.dot(cdv) * rdv;
+        let t_c = t.max(zero).min(one);
 
-    let hit = barrel_hit | endcap_inside | endcap_outside;
-    hit.any()
+        let perp = w - cdv * t;
+        let r_sq = perp.length_squared();
+
+        let t_excess = t - t_c;
+        let d_axial_sq = t_excess * t_excess * dir_sq;
+
+        let in_barrel = t.le(one) & t.le(one.max(t)) & zero.le(t);
+        let combined = cyl_r + cap_radius;
+        let barrel_hit = in_barrel & r_sq.le(combined * combined);
+
+        let inside_r = r_sq.le(cyl_r_sq);
+        let endcap_inside = inside_r & d_axial_sq.le(cap_r_sq);
+
+        let l = r_sq + cyl_r_sq + d_axial_sq - cap_r_sq;
+        let endcap_outside = l.le(zero) | (l * l).le(cyl_r_sq * r_sq * 4.0);
+
+        let hit = barrel_hit | endcap_inside | endcap_outside;
+        if (hit & active).any() {
+            return true;
+        }
+    }
+    false
 }
 
 impl Collides<Capsule> for Cylinder {
@@ -483,7 +485,7 @@ fn cylinder_cuboid_collides<const BROADPHASE: bool>(cyl: &Cylinder, cuboid: &Cub
         },
     ];
 
-    let ts = f32x8::new([
+    let ts = [
         0.0,
         1.0,
         ((-he[0] - p0[0]) * inv_dir[0]).clamp(0.0, 1.0),
@@ -492,23 +494,12 @@ fn cylinder_cuboid_collides<const BROADPHASE: bool>(cyl: &Cylinder, cuboid: &Cub
         ((he[1] - p0[1]) * inv_dir[1]).clamp(0.0, 1.0),
         ((-he[2] - p0[2]) * inv_dir[2]).clamp(0.0, 1.0),
         ((he[2] - p0[2]) * inv_dir[2]).clamp(0.0, 1.0),
-    ]);
-
-    let zero = f32x8::splat(0.0);
-    let mut dist_sq = zero;
-    for i in 0..3 {
-        let pos = f32x8::splat(p0[i]) + f32x8::splat(dir[i]) * ts;
-        let abs_pos = pos.max(-pos);
-        let excess = (abs_pos - f32x8::splat(he[i])).max(zero);
-        dist_sq = dist_sq + excess * excess;
-    }
-
-    if dist_sq.simd_le(f32x8::splat(rs_sq)).any() {
-        return true;
-    }
+    ];
 
     // Test 2: Check 8 cuboid corners against cylinder
-    let mut corners = [[0.0f32; 3]; 8];
+    let mut cx = [0.0f32; 8];
+    let mut cy = [0.0f32; 8];
+    let mut cz = [0.0f32; 8];
     let mut idx = 0;
     for &sx in &[-1.0f32, 1.0] {
         for &sy in &[-1.0f32, 1.0] {
@@ -517,40 +508,82 @@ fn cylinder_cuboid_collides<const BROADPHASE: bool>(cyl: &Cylinder, cuboid: &Cub
                     + cuboid.axes[0] * (he[0] * sx)
                     + cuboid.axes[1] * (he[1] * sy)
                     + cuboid.axes[2] * (he[2] * sz);
-                corners[idx] = [v.x, v.y, v.z];
+                cx[idx] = v.x;
+                cy[idx] = v.y;
+                cz[idx] = v.z;
                 idx += 1;
             }
         }
     }
 
-    // SIMD check: all 8 corners against cylinder
-    let cx = f32x8::new(corners.map(|c| c[0]));
-    let cy = f32x8::new(corners.map(|c| c[1]));
-    let cz = f32x8::new(corners.map(|c| c[2]));
+    cylinder_cuboid_eval(
+        ts,
+        Vec3::from(p0),
+        Vec3::from(dir),
+        Vec3::from(he),
+        rs_sq,
+        cx,
+        cy,
+        cz,
+        cyl.p1,
+        cyl.dir,
+        cyl.rdv,
+    )
+}
 
-    let wx = cx - f32x8::splat(cyl.p1.x);
-    let wy = cy - f32x8::splat(cyl.p1.y);
-    let wz = cz - f32x8::splat(cyl.p1.z);
+/// Barrel/face test (Test 1) and the 8-corner test (Test 2) under a single dispatch: each
+/// sub-test runs on the chosen backend through its `_on` companion.
+#[kernel]
+fn cylinder_cuboid_eval(
+    ctx: Gang,
+    ts: [f32; 8],
+    p0: Vec3,
+    dir: Vec3,
+    he: Vec3,
+    rs_sq: f32,
+    cx: [f32; 8],
+    cy: [f32; 8],
+    cz: [f32; 8],
+    cyl_p1: Vec3,
+    cyl_dir: Vec3,
+    rdv: f32,
+) -> bool {
+    crate::cuboid::capsule_cuboid_eval_on(ctx, ts, p0, dir, he, rs_sq)
+        || cylinder_corners_eval_on(ctx, cx, cy, cz, cyl_p1, cyl_dir, rdv, rs_sq)
+}
 
-    let cdx = f32x8::splat(cyl.dir.x);
-    let cdy = f32x8::splat(cyl.dir.y);
-    let cdz = f32x8::splat(cyl.dir.z);
-    let crdv = f32x8::splat(cyl.rdv);
+/// Are any of the 8 cuboid corners inside the cylinder barrel? A `lane < cnt` mask drops the
+/// inactive tail lanes a wider backend may add.
+#[kernel]
+fn cylinder_corners_eval(
+    ctx: Gang,
+    cx: [f32; 8],
+    cy: [f32; 8],
+    cz: [f32; 8],
+    cyl_p1: Vec3,
+    cyl_dir: Vec3,
+    rdv: f32,
+    rs_sq: f32,
+) -> bool {
+    let zero = ctx.splat(0.0);
+    let one = ctx.splat(1.0);
+    let rs = ctx.splat(rs_sq);
+    let p1v = ctx.splat_vec3(cyl_p1);
+    let dv = ctx.splat_vec3(cyl_dir);
 
-    let t = (wx * cdx + wy * cdy + wz * cdz) * crdv;
-    let one = f32x8::splat(1.0);
-    let in_slab = zero.simd_le(t) & t.simd_le(one);
+    for (off, cnt, active) in ctx.masked_chunks::<f32>(8) {
+        let w = ctx.load_partial_vec3([&cx[off..off + cnt], &cy[off..off + cnt], &cz[off..off + cnt]], 0.0) - p1v;
 
-    let perpx = wx - cdx * t;
-    let perpy = wy - cdy * t;
-    let perpz = wz - cdz * t;
-    let r_sq = perpx * perpx + perpy * perpy + perpz * perpz;
+        let t = w.dot(dv) * rdv;
+        let in_slab = zero.le(t) & t.le(one);
 
-    let corner_in_barrel = in_slab & r_sq.simd_le(f32x8::splat(rs_sq));
-    if corner_in_barrel.any() {
-        return true;
+        let perp = w - dv * t;
+        let r_sq = perp.length_squared();
+
+        if (in_slab & r_sq.le(rs) & active).any() {
+            return true;
+        }
     }
-
     false
 }
 
@@ -954,24 +987,28 @@ impl Stretchable for Cylinder {
 
         let s1 = n.cross(self.dir).normalize();
         let s2 = n.cross(translation).normalize();
-        let normals = [n, -n, s1, -s1, s2, -s2];
-        let planes: Vec<(Vec3, f32)> = normals
-            .iter()
-            .map(|&norm| {
-                let d = crate::convex_polytope::max_projection(&vertices, norm);
-                (norm, d)
-            })
-            .collect();
 
+        // One fused min/max sweep per direction: both orientations of each ± plane pair plus the
+        // OBB extents; `n` and `s1` are shared between the two uses.
         let dir_n = self.dir.normalize_or_zero();
         let obb_axes = [dir_n, s1, n];
-        let mut obb_he = [0.0f32; 3];
         let obb_center = self.p1 + self.dir * 0.5 + translation * 0.5;
-        for i in 0..3 {
-            let max_p = crate::convex_polytope::max_projection(&vertices, obb_axes[i]);
-            let min_p = crate::convex_polytope::min_projection(&vertices, obb_axes[i]);
-            obb_he[i] = (max_p - min_p) * 0.5;
-        }
+        let dirs = [n, s1, s2, dir_n];
+        let mut mm = [(0.0f32, 0.0f32); 4];
+        crate::convex_polytope::minmax_projections_k(&vertices, &dirs, &mut mm);
+        let planes: Vec<(Vec3, f32)> = vec![
+            (n, mm[0].1),
+            (-n, -mm[0].0),
+            (s1, mm[1].1),
+            (-s1, -mm[1].0),
+            (s2, mm[2].1),
+            (-s2, -mm[2].0),
+        ];
+        let obb_he = [
+            (mm[3].1 - mm[3].0) * 0.5,
+            (mm[1].1 - mm[1].0) * 0.5,
+            (mm[0].1 - mm[0].0) * 0.5,
+        ];
         let obb = Cuboid::new(obb_center, obb_axes, obb_he);
 
         CylinderStretch::Unaligned(edges, ConvexPolytope::with_obb(planes, vertices, obb))

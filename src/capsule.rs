@@ -362,25 +362,29 @@ impl Stretchable for Capsule {
         // 6 planes: ±n caps, ±s1 (perp to dir), ±s2 (perp to translation)
         let s1 = n.cross(self.dir).normalize();
         let s2 = n.cross(translation).normalize();
-        let normals = [n, -n, s1, -s1, s2, -s2];
-        let planes: Vec<(Vec3, f32)> = normals
-            .iter()
-            .map(|&norm| {
-                let d = crate::convex_polytope::max_projection(&vertices, norm);
-                (norm, d)
-            })
-            .collect();
 
-        // Derive OBB: axes are dir_normalized, s1, n; extents computed from vertices
+        // Derive OBB: axes are dir_normalized, s1, n; extents computed from vertices. One fused
+        // min/max sweep per direction covers both orientations of each ± plane pair and the OBB
+        // extents; `n` and `s1` are shared between the two uses.
         let dir_n = self.dir.normalize_or_zero();
         let obb_axes = [dir_n, s1, n];
-        let mut obb_he = [0.0f32; 3];
         let obb_center = self.p1 + self.dir * 0.5 + translation * 0.5;
-        for i in 0..3 {
-            let max_p = crate::convex_polytope::max_projection(&vertices, obb_axes[i]);
-            let min_p = crate::convex_polytope::min_projection(&vertices, obb_axes[i]);
-            obb_he[i] = (max_p - min_p) * 0.5;
-        }
+        let dirs = [n, s1, s2, dir_n];
+        let mut mm = [(0.0f32, 0.0f32); 4];
+        crate::convex_polytope::minmax_projections_k(&vertices, &dirs, &mut mm);
+        let planes: Vec<(Vec3, f32)> = vec![
+            (n, mm[0].1),
+            (-n, -mm[0].0),
+            (s1, mm[1].1),
+            (-s1, -mm[1].0),
+            (s2, mm[2].1),
+            (-s2, -mm[2].0),
+        ];
+        let obb_he = [
+            (mm[3].1 - mm[3].0) * 0.5,
+            (mm[1].1 - mm[1].0) * 0.5,
+            (mm[0].1 - mm[0].0) * 0.5,
+        ];
         let obb = Cuboid::new(obb_center, obb_axes, obb_he);
 
         CapsuleStretch::Unaligned(edges, ConvexPolytope::with_obb(planes, vertices, obb))

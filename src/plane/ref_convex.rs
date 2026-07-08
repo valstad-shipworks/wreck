@@ -1,6 +1,11 @@
 use glam::Vec3;
+use hydroplane::{Gang, kernel};
 
 use crate::capsule::segment_segment_dist_sq;
+use crate::convex_polytope::{
+    cols3, min_projection_cols_k_on, min_projection_k_on, minmax_projection_cols_k_on,
+    minmax_projection_k_on, stage_cols,
+};
 
 /// Borrowed view of a convex polygon's data, used to share collision logic
 /// between `ConvexPolygon` (heap) and `ArrayConvexPolygon` (stack).
@@ -294,11 +299,26 @@ pub(crate) fn ref_polygon_polytope_collides(
         return false;
     }
 
+    !polygon_polytope_separated_k(polygon, planes, vertices)
+}
+
+/// SAT for polygon-vs-polytope behind a single dispatch. Both vertex sets are staged
+/// column-wise once (the polytope's is swept per polygon edge, the polygon's per polytope
+/// plane), and the polygon-plane check fuses its min/max into one sweep.
+#[kernel]
+fn polygon_polytope_separated_k<'a>(
+    ctx: Gang,
+    polygon: &'a RefConvexPolygon<'a>,
+    planes: &'a [(Vec3, f32)],
+    vertices: &'a [Vec3],
+) -> bool {
+    let vcols = stage_cols(vertices);
+    let (vx, vy, vz) = cols3(&vcols);
+
     let poly_d = polygon.normal.dot(polygon.center);
-    let min_poly_proj = crate::convex_polytope::min_projection(vertices, polygon.normal);
-    let max_poly_proj = crate::convex_polytope::max_projection(vertices, polygon.normal);
-    if min_poly_proj > poly_d || max_poly_proj < poly_d {
-        return false;
+    let (lo, hi) = minmax_projection_cols_k_on(ctx, vx, vy, vz, polygon.normal);
+    if lo > poly_d || hi < poly_d {
+        return true;
     }
 
     let n = polygon.vertices_2d.len();
@@ -306,20 +326,20 @@ pub(crate) fn ref_polygon_polytope_collides(
         let en = polygon.edge_normals_2d[i];
         let axis = polygon.u_axis * en[0] + polygon.v_axis * en[1];
         let d3d = polygon.edge_offsets_2d[i] + axis.dot(polygon.center);
-        let min_proj = crate::convex_polytope::min_projection(vertices, axis);
-        if min_proj > d3d {
-            return false;
+        if min_projection_cols_k_on(ctx, vx, vy, vz, axis) > d3d {
+            return true;
         }
     }
 
+    let pcols = stage_cols(polygon.vertices_3d);
+    let (px, py, pz) = cols3(&pcols);
     for &(normal, d) in planes {
-        let min_proj = crate::convex_polytope::min_projection(polygon.vertices_3d, normal);
-        if min_proj > d {
-            return false;
+        if min_projection_cols_k_on(ctx, px, py, pz, normal) > d {
+            return true;
         }
     }
 
-    true
+    false
 }
 
 pub(crate) fn ref_polygon_infinite_plane_collides(
@@ -336,15 +356,26 @@ pub(crate) fn ref_polygon_polygon_collides(a: &RefConvexPolygon, b: &RefConvexPo
         return false;
     }
 
+    !polygons_separated_k(a, b)
+}
+
+/// SAT for polygon-vs-polygon behind a single dispatch: both face normals and both edge-normal
+/// fans project through the outer kernel's backend; the edge-cross axes keep the scalar
+/// `project_onto` since each axis projects only a handful of vertices.
+#[kernel]
+fn polygons_separated_k<'a>(
+    ctx: Gang,
+    a: &'a RefConvexPolygon<'a>,
+    b: &'a RefConvexPolygon<'a>,
+) -> bool {
     let eps = 1e-6f32;
 
-    // Both polygon normals (bilateral zero-thickness check)
+    // Both polygon normals (bilateral zero-thickness check), min/max fused into one sweep
     for (poly, other_verts) in [(a, b.vertices_3d), (b, a.vertices_3d)] {
         let poly_d = poly.normal.dot(poly.center);
-        let min_proj = crate::convex_polytope::min_projection(other_verts, poly.normal);
-        let max_proj = crate::convex_polytope::max_projection(other_verts, poly.normal);
-        if min_proj > poly_d + eps || max_proj < poly_d - eps {
-            return false;
+        let (lo, hi) = minmax_projection_k_on(ctx, other_verts, poly.normal);
+        if lo > poly_d + eps || hi < poly_d - eps {
+            return true;
         }
     }
 
@@ -355,9 +386,8 @@ pub(crate) fn ref_polygon_polygon_collides(a: &RefConvexPolygon, b: &RefConvexPo
             let en = poly.edge_normals_2d[i];
             let axis = poly.u_axis * en[0] + poly.v_axis * en[1];
             let d3d = poly.edge_offsets_2d[i] + axis.dot(poly.center);
-            let min_proj = crate::convex_polytope::min_projection(other_verts, axis);
-            if min_proj > d3d + eps {
-                return false;
+            if min_projection_k_on(ctx, other_verts, axis) > d3d + eps {
+                return true;
             }
         }
     }
@@ -377,10 +407,10 @@ pub(crate) fn ref_polygon_polygon_collides(a: &RefConvexPolygon, b: &RefConvexPo
             let (smin, smax) = a.project_onto(axis);
             let (omin, omax) = b.project_onto(axis);
             if smin > omax + eps || omin > smax + eps {
-                return false;
+                return true;
             }
         }
     }
 
-    true
+    false
 }
