@@ -323,8 +323,16 @@ fn capsule_collider_soa_batch_matches_bruteforce() {
 
     let mut rng = SmallRng::seed_from_u64(2024);
     let rand_cap = |rng: &mut SmallRng| {
-        let p1 = Vec3::new(rng.random_range(-3.0..3.0), rng.random_range(-3.0..3.0), rng.random_range(-3.0..3.0));
-        let seg = Vec3::new(rng.random_range(-2.0..2.0), rng.random_range(-2.0..2.0), rng.random_range(-2.0..2.0));
+        let p1 = Vec3::new(
+            rng.random_range(-3.0..3.0),
+            rng.random_range(-3.0..3.0),
+            rng.random_range(-3.0..3.0),
+        );
+        let seg = Vec3::new(
+            rng.random_range(-2.0..2.0),
+            rng.random_range(-2.0..2.0),
+            rng.random_range(-2.0..2.0),
+        );
         Capsule::new(p1, p1 + seg, rng.random_range(0.1..1.2))
     };
 
@@ -357,8 +365,16 @@ fn cylinder_collider_soa_batch_matches_bruteforce() {
 
     let mut rng = SmallRng::seed_from_u64(99);
     let rand_cyl = |rng: &mut SmallRng| {
-        let p1 = Vec3::new(rng.random_range(-3.0..3.0), rng.random_range(-3.0..3.0), rng.random_range(-3.0..3.0));
-        let seg = Vec3::new(rng.random_range(-2.0..2.0), rng.random_range(-2.0..2.0), rng.random_range(-2.0..2.0));
+        let p1 = Vec3::new(
+            rng.random_range(-3.0..3.0),
+            rng.random_range(-3.0..3.0),
+            rng.random_range(-3.0..3.0),
+        );
+        let seg = Vec3::new(
+            rng.random_range(-2.0..2.0),
+            rng.random_range(-2.0..2.0),
+            rng.random_range(-2.0..2.0),
+        );
         Cylinder::new(p1, p1 + seg, rng.random_range(0.1..1.2))
     };
 
@@ -391,11 +407,33 @@ fn soa_cross_matrix_matches_bruteforce() {
     use rand::{Rng, SeedableRng, rngs::SmallRng};
 
     let mut rng = SmallRng::seed_from_u64(555);
-    let v = |rng: &mut SmallRng, s: f32| Vec3::new(rng.random_range(-s..s), rng.random_range(-s..s), rng.random_range(-s..s));
+    let v = |rng: &mut SmallRng, s: f32| {
+        Vec3::new(
+            rng.random_range(-s..s),
+            rng.random_range(-s..s),
+            rng.random_range(-s..s),
+        )
+    };
     let sph = |rng: &mut SmallRng| Sphere::new(v(rng, 3.0), rng.random_range(0.1..1.2));
-    let cap = |rng: &mut SmallRng| { let p = v(rng, 3.0); Capsule::new(p, p + v(rng, 2.0), rng.random_range(0.1..1.0)) };
-    let cyl = |rng: &mut SmallRng| { let p = v(rng, 3.0); Cylinder::new(p, p + v(rng, 2.0), rng.random_range(0.1..1.0)) };
-    let cub = |rng: &mut SmallRng| Cuboid::new(v(rng, 3.0), [Vec3::X, Vec3::Y, Vec3::Z], [rng.random_range(0.2..1.5), rng.random_range(0.2..1.5), rng.random_range(0.2..1.5)]);
+    let cap = |rng: &mut SmallRng| {
+        let p = v(rng, 3.0);
+        Capsule::new(p, p + v(rng, 2.0), rng.random_range(0.1..1.0))
+    };
+    let cyl = |rng: &mut SmallRng| {
+        let p = v(rng, 3.0);
+        Cylinder::new(p, p + v(rng, 2.0), rng.random_range(0.1..1.0))
+    };
+    let cub = |rng: &mut SmallRng| {
+        Cuboid::new(
+            v(rng, 3.0),
+            [Vec3::X, Vec3::Y, Vec3::Z],
+            [
+                rng.random_range(0.2..1.5),
+                rng.random_range(0.2..1.5),
+                rng.random_range(0.2..1.5),
+            ],
+        )
+    };
 
     macro_rules! cross {
         ($ga:expr, $gb:expr) => {{
@@ -406,9 +444,13 @@ fn soa_cross_matrix_matches_bruteforce() {
                 let b: Vec<_> = (0..nb).map(|_| $gb(&mut rng)).collect();
                 let expected = a.iter().any(|x| b.iter().any(|y| x.collides(y)));
                 let mut ca = Collider::<NoPcl>::new();
-                for x in &a { ca.add(*x); }
+                for x in &a {
+                    ca.add(*x);
+                }
                 let mut cb = Collider::<NoPcl>::new();
-                for y in &b { cb.add(*y); }
+                for y in &b {
+                    cb.add(*y);
+                }
                 assert_eq!(ca.collides_other(&cb), expected, "na={na} nb={nb}");
                 assert_eq!(cb.collides_other(&ca), expected, "rev na={na} nb={nb}");
             }

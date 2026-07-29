@@ -195,10 +195,6 @@ impl<const P: usize, const V: usize> Stretchable for ArrayConvexPolytope<P, V> {
 
 impl<const P: usize, const V: usize> fmt::Display for ArrayConvexPolytope<P, V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "ArrayConvexPolytope(planes: {}, vertices: {})",
-            P, V
-        )
+        write!(f, "ArrayConvexPolytope(planes: {}, vertices: {})", P, V)
     }
 }

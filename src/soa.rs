@@ -306,7 +306,14 @@ impl SpheresSoA {
         if self.is_empty() {
             return false;
         }
-        any_collides_sphere_k(self.x(), self.y(), self.z(), self.r(), sphere.center, sphere.radius)
+        any_collides_sphere_k(
+            self.x(),
+            self.y(),
+            self.z(),
+            self.r(),
+            sphere.center,
+            sphere.radius,
+        )
     }
 
     /// SIMD count of stored bounding spheres overlapping `query`.
@@ -314,7 +321,15 @@ impl SpheresSoA {
         if self.is_empty() {
             return 0;
         }
-        count_overlaps_k(self.x(), self.y(), self.z(), self.r(), query.center, query.radius, self.len) as usize
+        count_overlaps_k(
+            self.x(),
+            self.y(),
+            self.z(),
+            self.r(),
+            query.center,
+            query.radius,
+            self.len,
+        ) as usize
     }
 
     /// SIMD broadphase: mark which spheres overlap `query`.
@@ -335,7 +350,16 @@ impl SpheresSoA {
         if self.is_empty() {
             return false;
         }
-        broadphase_collect_k(self.x(), self.y(), self.z(), self.r(), query.center, query.radius, self.len, out)
+        broadphase_collect_k(
+            self.x(),
+            self.y(),
+            self.z(),
+            self.r(),
+            query.center,
+            query.radius,
+            self.len,
+            out,
+        )
     }
 
     /// Test if any sphere in `self` collides with any sphere in `other`.
@@ -376,7 +400,13 @@ impl Transformable for SpheresSoA {
 
     fn transform(&mut self, mat: glam::Affine3A) {
         let (xs, ys, zs, _) = self.slices_mut();
-        transform_k(xs, ys, zs, Mat3::from(mat.matrix3), Vec3::from(mat.translation));
+        transform_k(
+            xs,
+            ys,
+            zs,
+            Mat3::from(mat.matrix3),
+            Vec3::from(mat.translation),
+        );
     }
 }
 
@@ -403,7 +433,9 @@ fn any_collides_sphere_k<'a>(
     let sr = ctx.splat(radius);
     ctx.any_n([xs, ys, zs, rs], |[x, y, z, r]| {
         let rsum = sr + r;
-        (c - Vec3Wide::from([x, y, z])).length_squared().le(rsum * rsum)
+        (c - Vec3Wide::from([x, y, z]))
+            .length_squared()
+            .le(rsum * rsum)
     })
 }
 
@@ -422,10 +454,15 @@ fn count_overlaps_k<'a>(
 ) -> f32 {
     let c = ctx.splat_vec3(center);
     let sr = ctx.splat(radius);
-    ctx.count_n([&xs[..len], &ys[..len], &zs[..len], &rs[..len]], |[x, y, z, r]| {
-        let rsum = sr + r;
-        (c - Vec3Wide::from([x, y, z])).length_squared().le(rsum * rsum)
-    }) as f32
+    ctx.count_n(
+        [&xs[..len], &ys[..len], &zs[..len], &rs[..len]],
+        |[x, y, z, r]| {
+            let rsum = sr + r;
+            (c - Vec3Wide::from([x, y, z]))
+                .length_squared()
+                .le(rsum * rsum)
+        },
+    ) as f32
 }
 
 /// Like [`any_collides_sphere_k`] but records every overlapping index into `out`.
@@ -447,7 +484,9 @@ fn broadphase_collect_k<'a>(
         [&xs[..len], &ys[..len], &zs[..len], &rs[..len]],
         |[x, y, z, r]| {
             let rsum = sr + r;
-            (c - Vec3Wide::from([x, y, z])).length_squared().le(rsum * rsum)
+            (c - Vec3Wide::from([x, y, z]))
+                .length_squared()
+                .le(rsum * rsum)
         },
         |idx| out[idx] = true,
     )
@@ -471,7 +510,9 @@ fn any_collides_soa_k<'a>(
         let sr = ctx.splat(ars[i]);
         let hit = ctx.any_n([bxs, bys, bzs, brs], |[x, y, z, r]| {
             let rsum = sr + r;
-            (c - Vec3Wide::from([x, y, z])).length_squared().le(rsum * rsum)
+            (c - Vec3Wide::from([x, y, z]))
+                .length_squared()
+                .le(rsum * rsum)
         });
         if hit {
             return true;
@@ -483,20 +524,33 @@ fn any_collides_soa_k<'a>(
 #[kernel]
 fn translate_k<'a>(ctx: Gang, xs: &'a mut [f32], ys: &'a mut [f32], zs: &'a mut [f32], off: Vec3) {
     let off = ctx.splat_vec3(off);
-    ctx.map_n::<f32, 3>([xs, ys, zs], 0.0, |[x, y, z]| (Vec3Wide::from([x, y, z]) + off).0);
+    ctx.map_n::<f32, 3>([xs, ys, zs], 0.0, |[x, y, z]| {
+        (Vec3Wide::from([x, y, z]) + off).0
+    });
 }
 
 #[kernel]
 fn rotate_mat_k<'a>(ctx: Gang, xs: &'a mut [f32], ys: &'a mut [f32], zs: &'a mut [f32], m: Mat3) {
     let m = ctx.splat_mat3(m);
-    ctx.map_n::<f32, 3>([xs, ys, zs], 0.0, |[x, y, z]| m.mul_vec3(Vec3Wide::from([x, y, z])).0);
+    ctx.map_n::<f32, 3>([xs, ys, zs], 0.0, |[x, y, z]| {
+        m.mul_vec3(Vec3Wide::from([x, y, z])).0
+    });
 }
 
 #[kernel]
-fn transform_k<'a>(ctx: Gang, xs: &'a mut [f32], ys: &'a mut [f32], zs: &'a mut [f32], m: Mat3, t: Vec3) {
+fn transform_k<'a>(
+    ctx: Gang,
+    xs: &'a mut [f32],
+    ys: &'a mut [f32],
+    zs: &'a mut [f32],
+    m: Mat3,
+    t: Vec3,
+) {
     let m = ctx.splat_mat3(m);
     let t = ctx.splat_vec3(t);
-    ctx.map_n::<f32, 3>([xs, ys, zs], 0.0, |[x, y, z]| m.mul_add(Vec3Wide::from([x, y, z]), t).0);
+    ctx.map_n::<f32, 3>([xs, ys, zs], 0.0, |[x, y, z]| {
+        m.mul_add(Vec3Wide::from([x, y, z]), t).0
+    });
 }
 
 #[kernel]
@@ -668,7 +722,12 @@ where
             return false;
         }
         let (qx, qy, qz, qr) = (bp.center.x, bp.center.y, bp.center.z, bp.radius);
-        let (bx, by, bz, br) = (self.broad.x(), self.broad.y(), self.broad.z(), self.broad.r());
+        let (bx, by, bz, br) = (
+            self.broad.x(),
+            self.broad.y(),
+            self.broad.z(),
+            self.broad.r(),
+        );
         self.items.iter().enumerate().any(|(i, item)| {
             let dx = bx[i] - qx;
             let dy = by[i] - qy;
@@ -853,7 +912,12 @@ where
             return false;
         }
         let (qx, qy, qz, qr) = (bp.center.x, bp.center.y, bp.center.z, bp.radius);
-        let (bx, by, bz, br) = (self.broad.x(), self.broad.y(), self.broad.z(), self.broad.r());
+        let (bx, by, bz, br) = (
+            self.broad.x(),
+            self.broad.y(),
+            self.broad.z(),
+            self.broad.r(),
+        );
         (0..self.shapes.len()).any(|i| {
             let dx = bx[i] - qx;
             let dy = by[i] - qy;
@@ -1037,7 +1101,17 @@ pub(crate) mod batch {
         if soa.is_empty() {
             return false;
         }
-        line_vs_spheres_k(soa.x(), soa.y(), soa.z(), soa.r(), origin, dir, rdv, t_min, t_max)
+        line_vs_spheres_k(
+            soa.x(),
+            soa.y(),
+            soa.z(),
+            soa.r(),
+            origin,
+            dir,
+            rdv,
+            t_min,
+            t_max,
+        )
     }
 
     #[kernel]
@@ -1104,7 +1178,15 @@ pub(crate) mod batch {
         if soa.is_empty() {
             return false;
         }
-        cuboid_vs_spheres_k(soa.x(), soa.y(), soa.z(), soa.r(), cuboid.center, cuboid.axes, cuboid.half_extents)
+        cuboid_vs_spheres_k(
+            soa.x(),
+            soa.y(),
+            soa.z(),
+            soa.r(),
+            cuboid.center,
+            cuboid.axes,
+            cuboid.half_extents,
+        )
     }
 
     #[kernel]
@@ -1142,7 +1224,16 @@ pub(crate) mod batch {
         if soa.is_empty() {
             return false;
         }
-        capsule_vs_spheres_k(soa.x(), soa.y(), soa.z(), soa.r(), capsule.p1, capsule.dir, capsule.rdv, capsule.radius)
+        capsule_vs_spheres_k(
+            soa.x(),
+            soa.y(),
+            soa.z(),
+            soa.r(),
+            capsule.p1,
+            capsule.dir,
+            capsule.rdv,
+            capsule.radius,
+        )
     }
 
     #[kernel]
@@ -1260,7 +1351,12 @@ pub(crate) mod batch {
         }
         sphere_vs_capsules_broad_k(
             col,
-            [sphere.center.x, sphere.center.y, sphere.center.z, sphere.radius],
+            [
+                sphere.center.x,
+                sphere.center.y,
+                sphere.center.z,
+                sphere.radius,
+            ],
         )
     }
 
@@ -1282,8 +1378,15 @@ pub(crate) mod batch {
         for (off, cnt, active) in ctx.masked_chunks::<f32>(len) {
             let r = off..off + cnt;
 
-            let [bx, by, bz, br] =
-                ctx.load_partial_n([&b.x()[r.clone()], &b.y()[r.clone()], &b.z()[r.clone()], &b.r()[r.clone()]], 0.0);
+            let [bx, by, bz, br] = ctx.load_partial_n(
+                [
+                    &b.x()[r.clone()],
+                    &b.y()[r.clone()],
+                    &b.z()[r.clone()],
+                    &b.r()[r.clone()],
+                ],
+                0.0,
+            );
             let bdx = cx - bx;
             let bdy = cy - by;
             let bdz = cz - bz;
@@ -1309,7 +1412,9 @@ pub(crate) mod batch {
             let dfx = cx - p1xv;
             let dfy = cy - p1yv;
             let dfz = cz - p1zv;
-            let t = ((dfx * dxv + dfy * dyv + dfz * dzv) * rdvv).max(zero).min(one);
+            let t = ((dfx * dxv + dfy * dyv + dfz * dzv) * rdvv)
+                .max(zero)
+                .min(one);
 
             let ex = cx - (p1xv + dxv * t);
             let ey = cy - (p1yv + dyv * t);
@@ -1332,7 +1437,12 @@ pub(crate) mod batch {
         }
         sphere_vs_cuboids_broad_k(
             col,
-            [sphere.center.x, sphere.center.y, sphere.center.z, sphere.radius],
+            [
+                sphere.center.x,
+                sphere.center.y,
+                sphere.center.z,
+                sphere.radius,
+            ],
         )
     }
 
@@ -1356,8 +1466,15 @@ pub(crate) mod batch {
         for (off, cnt, active) in ctx.masked_chunks::<f32>(len) {
             let r = off..off + cnt;
 
-            let [bx, by, bz, br] =
-                ctx.load_partial_n([&b.x()[r.clone()], &b.y()[r.clone()], &b.z()[r.clone()], &b.r()[r.clone()]], 0.0);
+            let [bx, by, bz, br] = ctx.load_partial_n(
+                [
+                    &b.x()[r.clone()],
+                    &b.y()[r.clone()],
+                    &b.z()[r.clone()],
+                    &b.r()[r.clone()],
+                ],
+                0.0,
+            );
             let bdx = cx - bx;
             let bdy = cy - by;
             let bdz = cz - bz;
@@ -1366,8 +1483,14 @@ pub(crate) mod batch {
                 continue;
             }
 
-            let [c0, c1, c2] =
-                ctx.load_partial_n([&s.col(0)[r.clone()], &s.col(1)[r.clone()], &s.col(2)[r.clone()]], 0.0);
+            let [c0, c1, c2] = ctx.load_partial_n(
+                [
+                    &s.col(0)[r.clone()],
+                    &s.col(1)[r.clone()],
+                    &s.col(2)[r.clone()],
+                ],
+                0.0,
+            );
             let dfx = cx - c0;
             let dfy = cy - c1;
             let dfz = cz - c2;
@@ -1377,7 +1500,8 @@ pub(crate) mod batch {
                 let proj = dfx * ctx.load_partial(&s.col(3 + a * 3)[r.clone()], 0.0)
                     + dfy * ctx.load_partial(&s.col(4 + a * 3)[r.clone()], 0.0)
                     + dfz * ctx.load_partial(&s.col(5 + a * 3)[r.clone()], 0.0);
-                let excess = (proj.abs() - ctx.load_partial(&s.col(12 + a)[r.clone()], 0.0)).max(zero);
+                let excess =
+                    (proj.abs() - ctx.load_partial(&s.col(12 + a)[r.clone()], 0.0)).max(zero);
                 dist_sq = dist_sq + excess * excess;
             }
 
@@ -1396,7 +1520,12 @@ pub(crate) mod batch {
         }
         sphere_vs_cylinders_broad_k(
             col,
-            [sphere.center.x, sphere.center.y, sphere.center.z, sphere.radius],
+            [
+                sphere.center.x,
+                sphere.center.y,
+                sphere.center.z,
+                sphere.radius,
+            ],
         )
     }
 
@@ -1421,8 +1550,15 @@ pub(crate) mod batch {
         for (off, cnt, active) in ctx.masked_chunks::<f32>(len) {
             let r = off..off + cnt;
 
-            let [bx, by, bz, br] =
-                ctx.load_partial_n([&b.x()[r.clone()], &b.y()[r.clone()], &b.z()[r.clone()], &b.r()[r.clone()]], 0.0);
+            let [bx, by, bz, br] = ctx.load_partial_n(
+                [
+                    &b.x()[r.clone()],
+                    &b.y()[r.clone()],
+                    &b.z()[r.clone()],
+                    &b.r()[r.clone()],
+                ],
+                0.0,
+            );
             let bdx = cx - bx;
             let bdy = cy - by;
             let bdz = cz - bz;
@@ -1485,7 +1621,10 @@ pub(crate) mod batch {
         if col.is_empty() {
             return false;
         }
-        plane_vs_capsules_broad_k(col, [plane.normal.x, plane.normal.y, plane.normal.z, plane.d])
+        plane_vs_capsules_broad_k(
+            col,
+            [plane.normal.x, plane.normal.y, plane.normal.z, plane.d],
+        )
     }
 
     #[kernel]
@@ -1541,7 +1680,10 @@ pub(crate) mod batch {
         if col.is_empty() {
             return false;
         }
-        plane_vs_cuboids_broad_k(col, [plane.normal.x, plane.normal.y, plane.normal.z, plane.d])
+        plane_vs_cuboids_broad_k(
+            col,
+            [plane.normal.x, plane.normal.y, plane.normal.z, plane.d],
+        )
     }
 
     #[kernel]
@@ -1593,7 +1735,10 @@ pub(crate) mod batch {
         if col.is_empty() {
             return false;
         }
-        plane_vs_cylinders_broad_k(col, [plane.normal.x, plane.normal.y, plane.normal.z, plane.d])
+        plane_vs_cylinders_broad_k(
+            col,
+            [plane.normal.x, plane.normal.y, plane.normal.z, plane.d],
+        )
     }
 
     #[kernel]
@@ -1713,8 +1858,15 @@ pub(crate) mod batch {
         for (off, cnt, active) in ctx.masked_chunks::<f32>(len) {
             let r = off..off + cnt;
 
-            let [bx, by, bz, br] =
-                ctx.load_partial_n([&b.x()[r.clone()], &b.y()[r.clone()], &b.z()[r.clone()], &b.r()[r.clone()]], 0.0);
+            let [bx, by, bz, br] = ctx.load_partial_n(
+                [
+                    &b.x()[r.clone()],
+                    &b.y()[r.clone()],
+                    &b.z()[r.clone()],
+                    &b.r()[r.clone()],
+                ],
+                0.0,
+            );
             let bdx = qcx - bx;
             let bdy = qcy - by;
             let bdz = qcz - bz;
@@ -1745,7 +1897,8 @@ pub(crate) mod batch {
             let bdot = d1x * d2x + d1y * d2y + d1z * d2z;
             let denom = av * e - bdot * bdot;
 
-            let s_gen = (((bdot * f - cc * e) / denom).max(zero).min(one)).select(denom.abs().gt(eps), zero);
+            let s_gen = (((bdot * f - cc * e) / denom).max(zero).min(one))
+                .select(denom.abs().gt(eps), zero);
             let t_n = (bdot * s_gen + f) / e;
             let below = t_n.lt(zero);
             let above = t_n.gt(one);
@@ -1772,7 +1925,10 @@ pub(crate) mod batch {
     /// Single-dispatch capsule-SoA vs capsule-SoA: the query capsules are walked scalar-outer, each
     /// run through the segment-segment narrowphase over `b` via the `_on` companion — one ISA
     /// dispatch for the whole n×m rather than one per query capsule (the per-query path's cost).
-    pub fn capsules_vs_capsules_soa(a: &ShapeCollection<Capsule>, b: &ShapeCollection<Capsule>) -> bool {
+    pub fn capsules_vs_capsules_soa(
+        a: &ShapeCollection<Capsule>,
+        b: &ShapeCollection<Capsule>,
+    ) -> bool {
         if a.is_empty() || b.is_empty() {
             return false;
         }
@@ -1792,7 +1948,11 @@ pub(crate) mod batch {
             let rad = s.col(6)[i];
             let aa = dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2];
             let hit = if aa > f32::EPSILON {
-                let bc = [p1[0] + dir[0] * 0.5, p1[1] + dir[1] * 0.5, p1[2] + dir[2] * 0.5];
+                let bc = [
+                    p1[0] + dir[0] * 0.5,
+                    p1[1] + dir[1] * 0.5,
+                    p1[2] + dir[2] * 0.5,
+                ];
                 let br = aa.sqrt() * 0.5 + rad;
                 capsule_vs_capsules_broad_k_on(ctx, b, [bc[0], bc[1], bc[2], br], p1, dir, rad, aa)
             } else {
@@ -1809,7 +1969,10 @@ pub(crate) mod batch {
     /// through the barrel/endcap narrowphase over `b` via the `_on` companion (one dispatch total).
     /// The kernel assumes non-degenerate queries; if any query cylinder is zero-length the whole
     /// call defers to the per-query path (which handles the degenerate case).
-    pub fn cylinders_vs_cylinders_soa(a: &ShapeCollection<Cylinder>, b: &ShapeCollection<Cylinder>) -> bool {
+    pub fn cylinders_vs_cylinders_soa(
+        a: &ShapeCollection<Cylinder>,
+        b: &ShapeCollection<Cylinder>,
+    ) -> bool {
         if a.is_empty() || b.is_empty() {
             return false;
         }
@@ -1820,7 +1983,12 @@ pub(crate) mod batch {
                 return a.shapes.iter().any(|q| cylinder_vs_cylinders_broad(&q, b));
             }
         }
+        // The kernel over-approximates each cylinder by its capsule, so a miss is
+        // final but a hit needs the exact per-pair test.
         cylinders_vs_cylinders_soa_k(a, b)
+            && a.shapes
+                .iter()
+                .any(|q| b.shapes.iter().any(|c| q.collides(&c)))
     }
 
     #[kernel]
@@ -1836,9 +2004,22 @@ pub(crate) mod batch {
             let rad = s.col(6)[i];
             let rdv = s.col(7)[i];
             let aa = dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2];
-            let bc = [p1[0] + dir[0] * 0.5, p1[1] + dir[1] * 0.5, p1[2] + dir[2] * 0.5];
+            let bc = [
+                p1[0] + dir[0] * 0.5,
+                p1[1] + dir[1] * 0.5,
+                p1[2] + dir[2] * 0.5,
+            ];
             let br = aa.sqrt() * 0.5 + rad;
-            if cylinder_vs_cylinders_broad_k_on(ctx, b, [bc[0], bc[1], bc[2], br], p1, dir, rad, aa, rdv) {
+            if cylinder_vs_cylinders_broad_k_on(
+                ctx,
+                b,
+                [bc[0], bc[1], bc[2], br],
+                p1,
+                dir,
+                rad,
+                aa,
+                rdv,
+            ) {
                 return true;
             }
         }
@@ -1857,6 +2038,8 @@ pub(crate) mod batch {
             return col.shapes.iter().any(|c| q.test::<false>(&c));
         }
         let (bc, br) = q.bounding_sphere();
+        // The kernel over-approximates each cylinder by its capsule, so a miss is
+        // final but a hit needs the exact per-pair test.
         cylinder_vs_cylinders_broad_k(
             col,
             [bc.x, bc.y, bc.z, br],
@@ -1865,7 +2048,7 @@ pub(crate) mod batch {
             q.radius,
             a,
             q.rdv,
-        )
+        ) && col.shapes.iter().any(|c| q.collides(&c))
     }
 
     /// Query cylinder vs every stored cylinder (`p1=0..2`, `dir=3..5`, `radius=6`, `rdv=7`):
@@ -1939,8 +2122,15 @@ pub(crate) mod batch {
         for (off, cnt, active) in ctx.masked_chunks::<f32>(len) {
             let r = off..off + cnt;
 
-            let [bx, by, bz, br] =
-                ctx.load_partial_n([&b.x()[r.clone()], &b.y()[r.clone()], &b.z()[r.clone()], &b.r()[r.clone()]], 0.0);
+            let [bx, by, bz, br] = ctx.load_partial_n(
+                [
+                    &b.x()[r.clone()],
+                    &b.y()[r.clone()],
+                    &b.z()[r.clone()],
+                    &b.r()[r.clone()],
+                ],
+                0.0,
+            );
             let bdx = qcx - bx;
             let bdy = qcy - by;
             let bdz = qcz - bz;
@@ -1973,7 +2163,8 @@ pub(crate) mod batch {
             let cc = d1x * rx + d1y * ry + d1z * rz;
             let bdot = d1x * d2x + d1y * d2y + d1z * d2z;
             let denom = av * e - bdot * bdot;
-            let s_gen = (((bdot * f - cc * e) / denom).max(zero).min(one)).select(denom.abs().gt(eps), zero);
+            let s_gen = (((bdot * f - cc * e) / denom).max(zero).min(one))
+                .select(denom.abs().gt(eps), zero);
             let t_n = (bdot * s_gen + f) / e;
             let below = t_n.lt(zero);
             let above = t_n.gt(one);
@@ -2066,8 +2257,15 @@ pub(crate) mod batch {
         for (off, cnt, active) in ctx.masked_chunks::<f32>(len) {
             let r = off..off + cnt;
 
-            let [bx, by, bz, br] =
-                ctx.load_partial_n([&b.x()[r.clone()], &b.y()[r.clone()], &b.z()[r.clone()], &b.r()[r.clone()]], 0.0);
+            let [bx, by, bz, br] = ctx.load_partial_n(
+                [
+                    &b.x()[r.clone()],
+                    &b.y()[r.clone()],
+                    &b.z()[r.clone()],
+                    &b.r()[r.clone()],
+                ],
+                0.0,
+            );
             let bmax = qbr + br;
             let bdx = qcx - bx;
             let bdy = qcy - by;
@@ -2076,8 +2274,14 @@ pub(crate) mod batch {
                 continue;
             }
 
-            let [bcx, bcy, bcz] =
-                ctx.load_partial_n([&s.col(0)[r.clone()], &s.col(1)[r.clone()], &s.col(2)[r.clone()]], 0.0);
+            let [bcx, bcy, bcz] = ctx.load_partial_n(
+                [
+                    &s.col(0)[r.clone()],
+                    &s.col(1)[r.clone()],
+                    &s.col(2)[r.clone()],
+                ],
+                0.0,
+            );
             let bax: [[Varying<f32, _>; 3]; 3] = core::array::from_fn(|j| {
                 core::array::from_fn(|k| ctx.load_partial(&s.col(3 + j * 3 + k)[r.clone()], 0.0))
             });
@@ -2095,9 +2299,8 @@ pub(crate) mod batch {
             let tvx = bcx - acx;
             let tvy = bcy - acy;
             let tvz = bcz - acz;
-            let t: [Varying<f32, _>; 3] = core::array::from_fn(|i| {
-                tvx * aax[i][0] + tvy * aax[i][1] + tvz * aax[i][2]
-            });
+            let t: [Varying<f32, _>; 3] =
+                core::array::from_fn(|i| tvx * aax[i][0] + tvy * aax[i][1] + tvz * aax[i][2]);
 
             let mut collide = zero.le(zero);
             let mut sat = |sep: Varying<f32, _>, ra: Varying<f32, _>, rb: Varying<f32, _>| {
@@ -2171,7 +2374,10 @@ pub(crate) mod batch {
 
     /// Single-dispatch capsule-SoA vs cuboid-SoA — query capsules walked scalar-outer, each run
     /// through the breakpoint-sampling narrowphase over `b` via the `_on` companion.
-    pub fn capsules_vs_cuboids_soa(a: &ShapeCollection<Capsule>, b: &ShapeCollection<Cuboid>) -> bool {
+    pub fn capsules_vs_cuboids_soa(
+        a: &ShapeCollection<Capsule>,
+        b: &ShapeCollection<Cuboid>,
+    ) -> bool {
         if a.is_empty() || b.is_empty() {
             return false;
         }
@@ -2190,9 +2396,14 @@ pub(crate) mod batch {
             let dir = [s.col(3)[i], s.col(4)[i], s.col(5)[i]];
             let rad = s.col(6)[i];
             let aa = dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2];
-            let bc = [p1[0] + dir[0] * 0.5, p1[1] + dir[1] * 0.5, p1[2] + dir[2] * 0.5];
+            let bc = [
+                p1[0] + dir[0] * 0.5,
+                p1[1] + dir[1] * 0.5,
+                p1[2] + dir[2] * 0.5,
+            ];
             let br = aa.sqrt() * 0.5 + rad;
-            if capsule_vs_cuboids_broad_k_on(ctx, b, [bc[0], bc[1], bc[2], br], p1, dir, rad * rad) {
+            if capsule_vs_cuboids_broad_k_on(ctx, b, [bc[0], bc[1], bc[2], br], p1, dir, rad * rad)
+            {
                 return true;
             }
         }
@@ -2209,7 +2420,11 @@ pub(crate) mod batch {
     }
 
     #[kernel]
-    fn spheres_vs_capsules_soa_k<'a>(ctx: Gang, a: &'a SpheresSoA, b: &'a ShapeCollection<Capsule>) -> bool {
+    fn spheres_vs_capsules_soa_k<'a>(
+        ctx: Gang,
+        a: &'a SpheresSoA,
+        b: &'a ShapeCollection<Capsule>,
+    ) -> bool {
         let (xs, ys, zs, rs) = (a.x(), a.y(), a.z(), a.r());
         for i in 0..xs.len() {
             if sphere_vs_capsules_broad_k_on(ctx, b, [xs[i], ys[i], zs[i], rs[i]]) {
@@ -2227,7 +2442,11 @@ pub(crate) mod batch {
     }
 
     #[kernel]
-    fn spheres_vs_cuboids_soa_k<'a>(ctx: Gang, a: &'a SpheresSoA, b: &'a ShapeCollection<Cuboid>) -> bool {
+    fn spheres_vs_cuboids_soa_k<'a>(
+        ctx: Gang,
+        a: &'a SpheresSoA,
+        b: &'a ShapeCollection<Cuboid>,
+    ) -> bool {
         let (xs, ys, zs, rs) = (a.x(), a.y(), a.z(), a.r());
         for i in 0..xs.len() {
             if sphere_vs_cuboids_broad_k_on(ctx, b, [xs[i], ys[i], zs[i], rs[i]]) {
@@ -2245,7 +2464,11 @@ pub(crate) mod batch {
     }
 
     #[kernel]
-    fn spheres_vs_cylinders_soa_k<'a>(ctx: Gang, a: &'a SpheresSoA, b: &'a ShapeCollection<Cylinder>) -> bool {
+    fn spheres_vs_cylinders_soa_k<'a>(
+        ctx: Gang,
+        a: &'a SpheresSoA,
+        b: &'a ShapeCollection<Cylinder>,
+    ) -> bool {
         let (xs, ys, zs, rs) = (a.x(), a.y(), a.z(), a.r());
         for i in 0..xs.len() {
             if sphere_vs_cylinders_broad_k_on(ctx, b, [xs[i], ys[i], zs[i], rs[i]]) {
@@ -2256,11 +2479,20 @@ pub(crate) mod batch {
     }
 
     /// Single-dispatch capsule-SoA vs cylinder-SoA (query capsules scalar-outer via the `_on`).
-    pub fn capsules_vs_cylinders_soa(a: &ShapeCollection<Capsule>, b: &ShapeCollection<Cylinder>) -> bool {
+    pub fn capsules_vs_cylinders_soa(
+        a: &ShapeCollection<Capsule>,
+        b: &ShapeCollection<Cylinder>,
+    ) -> bool {
         if a.is_empty() || b.is_empty() {
             return false;
         }
-        capsules_vs_cylinders_soa_k(a, b)
+        // A kernel hit is an exact point-to-cylinder sample, so it is final; a miss
+        // can hide an interior minimum, so each query re-runs through the exact
+        // per-query path (SIMD spine reject, then per-pair confirmation).
+        if capsules_vs_cylinders_soa_k(a, b) {
+            return true;
+        }
+        a.shapes.iter().any(|q| capsule_vs_cylinders_broad(&q, b))
     }
 
     #[kernel]
@@ -2275,7 +2507,11 @@ pub(crate) mod batch {
             let dir = [s.col(3)[i], s.col(4)[i], s.col(5)[i]];
             let rad = s.col(6)[i];
             let aa = dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2];
-            let bc = [p1[0] + dir[0] * 0.5, p1[1] + dir[1] * 0.5, p1[2] + dir[2] * 0.5];
+            let bc = [
+                p1[0] + dir[0] * 0.5,
+                p1[1] + dir[1] * 0.5,
+                p1[2] + dir[2] * 0.5,
+            ];
             let br = aa.sqrt() * 0.5 + rad;
             if capsule_vs_cylinders_broad_k_on(ctx, b, [bc[0], bc[1], bc[2], br], p1, dir, rad) {
                 return true;
@@ -2285,11 +2521,19 @@ pub(crate) mod batch {
     }
 
     /// Single-dispatch cylinder-SoA vs cuboid-SoA (query cylinders scalar-outer via the `_on`).
-    pub fn cylinders_vs_cuboids_soa(a: &ShapeCollection<Cylinder>, b: &ShapeCollection<Cuboid>) -> bool {
+    pub fn cylinders_vs_cuboids_soa(
+        a: &ShapeCollection<Cylinder>,
+        b: &ShapeCollection<Cuboid>,
+    ) -> bool {
         if a.is_empty() || b.is_empty() {
             return false;
         }
+        // The kernel over-approximates each cylinder by its capsule (its segment-box
+        // test is exact), so a miss is final but a hit needs the exact per-pair test.
         cylinders_vs_cuboids_soa_k(a, b)
+            && a.shapes
+                .iter()
+                .any(|q| b.shapes.iter().any(|c| q.collides(&c)))
     }
 
     #[kernel]
@@ -2305,9 +2549,21 @@ pub(crate) mod batch {
             let rad = s.col(6)[i];
             let rdv = s.col(7)[i];
             let aa = dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2];
-            let bc = [p1[0] + dir[0] * 0.5, p1[1] + dir[1] * 0.5, p1[2] + dir[2] * 0.5];
+            let bc = [
+                p1[0] + dir[0] * 0.5,
+                p1[1] + dir[1] * 0.5,
+                p1[2] + dir[2] * 0.5,
+            ];
             let br = aa.sqrt() * 0.5 + rad;
-            if cylinder_vs_cuboids_broad_k_on(ctx, b, [bc[0], bc[1], bc[2], br], p1, dir, rdv, rad * rad) {
+            if cylinder_vs_cuboids_broad_k_on(
+                ctx,
+                b,
+                [bc[0], bc[1], bc[2], br],
+                p1,
+                dir,
+                rdv,
+                rad * rad,
+            ) {
                 return true;
             }
         }
@@ -2331,9 +2587,10 @@ pub(crate) mod batch {
     }
 
     /// Query capsule vs every stored cuboid (`center=0..2`, `axes=3..11`, `half_extents=12..14`):
-    /// the capsule axis is projected into each cuboid's local frame and sampled at the 8 convex
-    /// breakpoints (2 endpoints + 6 slab crossings); a hit if any sample lies within the capsule
-    /// radius. A SIMD port of `capsule_cuboid_collides` over a lane of stored cuboids.
+    /// the capsule axis is projected into each cuboid's local frame and tested at the exact
+    /// candidate set (endpoints, slab crossings, and active-set quadratic vertices); a hit if
+    /// any candidate lies within the capsule radius. A SIMD port of `capsule_cuboid_collides`
+    /// over a lane of stored cuboids.
     #[kernel]
     fn capsule_vs_cuboids_broad_k<'a>(
         ctx: Gang,
@@ -2366,8 +2623,15 @@ pub(crate) mod batch {
         for (off, cnt, active) in ctx.masked_chunks::<f32>(len) {
             let r = off..off + cnt;
 
-            let [bx, by, bz, br] =
-                ctx.load_partial_n([&b.x()[r.clone()], &b.y()[r.clone()], &b.z()[r.clone()], &b.r()[r.clone()]], 0.0);
+            let [bx, by, bz, br] = ctx.load_partial_n(
+                [
+                    &b.x()[r.clone()],
+                    &b.y()[r.clone()],
+                    &b.z()[r.clone()],
+                    &b.r()[r.clone()],
+                ],
+                0.0,
+            );
             let bdx = qcx - bx;
             let bdy = qcy - by;
             let bdz = qcz - bz;
@@ -2376,8 +2640,14 @@ pub(crate) mod batch {
                 continue;
             }
 
-            let [cx, cy, cz] =
-                ctx.load_partial_n([&s.col(0)[r.clone()], &s.col(1)[r.clone()], &s.col(2)[r.clone()]], 0.0);
+            let [cx, cy, cz] = ctx.load_partial_n(
+                [
+                    &s.col(0)[r.clone()],
+                    &s.col(1)[r.clone()],
+                    &s.col(2)[r.clone()],
+                ],
+                0.0,
+            );
             let ax: [[Varying<f32, _>; 3]; 3] = core::array::from_fn(|i| {
                 core::array::from_fn(|k| ctx.load_partial(&s.col(3 + i * 3 + k)[r.clone()], 0.0))
             });
@@ -2411,6 +2681,38 @@ pub(crate) mod batch {
                 hit = hit | dist_sq(lo).le(rs) | dist_sq(hi).le(rs);
             }
 
+            // The squared distance is piecewise quadratic in t with breaks at the
+            // face crossings; a piece with two or three active axis excesses of
+            // signs s has its interior minimum at the vertex
+            // t = sum dir_i (s_i he_i - p0_i) / sum dir_i^2. Evaluating every sign
+            // combination alongside the breakpoints makes the minimum exact.
+            for i in 0..3 {
+                for j in (i + 1)..3 {
+                    let denom = dir[i] * dir[i] + dir[j] * dir[j];
+                    let dinv = (one / denom).select(denom.gt(eps), zero);
+                    for si in [-1.0f32, 1.0] {
+                        for sj in [-1.0f32, 1.0] {
+                            let num = (he[i] * si - p0[i]) * dir[i] + (he[j] * sj - p0[j]) * dir[j];
+                            let t = (num * dinv).max(zero).min(one);
+                            hit = hit | dist_sq(t).le(rs);
+                        }
+                    }
+                }
+            }
+            let denom = dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2];
+            let dinv = (one / denom).select(denom.gt(eps), zero);
+            for s0 in [-1.0f32, 1.0] {
+                for s1 in [-1.0f32, 1.0] {
+                    for s2 in [-1.0f32, 1.0] {
+                        let num = (he[0] * s0 - p0[0]) * dir[0]
+                            + (he[1] * s1 - p0[1]) * dir[1]
+                            + (he[2] * s2 - p0[2]) * dir[2];
+                        let t = (num * dinv).max(zero).min(one);
+                        hit = hit | dist_sq(t).le(rs);
+                    }
+                }
+            }
+
             if (hit & active).any() {
                 return true;
             }
@@ -2438,7 +2740,8 @@ pub(crate) mod batch {
     }
 
     /// Query cuboid vs every stored capsule (`p1=0..2`, `dir=3..5`, `radius=6`): each capsule axis
-    /// is projected into the query cuboid's local frame and sampled at the 8 convex breakpoints.
+    /// is projected into the query cuboid's local frame and tested at the exact candidate set
+    /// (endpoints, slab crossings, and active-set quadratic vertices).
     /// The companion of `capsule_vs_cuboids_broad` with the roles (and the per-lane radius) flipped.
     #[kernel]
     fn cuboid_vs_capsules_broad_k<'a>(
@@ -2467,8 +2770,15 @@ pub(crate) mod batch {
         for (off, cnt, active) in ctx.masked_chunks::<f32>(len) {
             let r = off..off + cnt;
 
-            let [bx, by, bz, br] =
-                ctx.load_partial_n([&b.x()[r.clone()], &b.y()[r.clone()], &b.z()[r.clone()], &b.r()[r.clone()]], 0.0);
+            let [bx, by, bz, br] = ctx.load_partial_n(
+                [
+                    &b.x()[r.clone()],
+                    &b.y()[r.clone()],
+                    &b.z()[r.clone()],
+                    &b.r()[r.clone()],
+                ],
+                0.0,
+            );
             let bdx = qcx - bx;
             let bdy = qcy - by;
             let bdz = qcz - bz;
@@ -2518,6 +2828,38 @@ pub(crate) mod batch {
                 hit = hit | dist_sq(lo).le(rs) | dist_sq(hi).le(rs);
             }
 
+            // The squared distance is piecewise quadratic in t with breaks at the
+            // face crossings; a piece with two or three active axis excesses of
+            // signs s has its interior minimum at the vertex
+            // t = sum dir_i (s_i he_i - p0_i) / sum dir_i^2. Evaluating every sign
+            // combination alongside the breakpoints makes the minimum exact.
+            for i in 0..3 {
+                for j in (i + 1)..3 {
+                    let denom = dir[i] * dir[i] + dir[j] * dir[j];
+                    let dinv = (one / denom).select(denom.gt(eps), zero);
+                    for si in [-1.0f32, 1.0] {
+                        for sj in [-1.0f32, 1.0] {
+                            let num = (he[i] * si - p0[i]) * dir[i] + (he[j] * sj - p0[j]) * dir[j];
+                            let t = (num * dinv).max(zero).min(one);
+                            hit = hit | dist_sq(t).le(rs);
+                        }
+                    }
+                }
+            }
+            let denom = dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2];
+            let dinv = (one / denom).select(denom.gt(eps), zero);
+            for s0 in [-1.0f32, 1.0] {
+                for s1 in [-1.0f32, 1.0] {
+                    for s2 in [-1.0f32, 1.0] {
+                        let num = (he[0] * s0 - p0[0]) * dir[0]
+                            + (he[1] * s1 - p0[1]) * dir[1]
+                            + (he[2] * s2 - p0[2]) * dir[2];
+                        let t = (num * dinv).max(zero).min(one);
+                        hit = hit | dist_sq(t).le(rs);
+                    }
+                }
+            }
+
             if (hit & active).any() {
                 return true;
             }
@@ -2557,9 +2899,29 @@ pub(crate) mod batch {
     /// query directions feed it the same operands as `Varying`s, so the math lives here once.
     fn cyl_cap_eval<S: Backend<f32>>(v: CylCap<S>) -> Mask<f32, S> {
         let CylCap {
-            zero, one, half, four, eps, e, rdvv,
-            ap1x, ap1y, ap1z, adx, ady, adz, cap_r, cap_r_sq,
-            cp1x, cp1y, cp1z, cdx, cdy, cdz, cyl_r, cyl_r_sq,
+            zero,
+            one,
+            half,
+            four,
+            eps,
+            e,
+            rdvv,
+            ap1x,
+            ap1y,
+            ap1z,
+            adx,
+            ady,
+            adz,
+            cap_r,
+            cap_r_sq,
+            cp1x,
+            cp1y,
+            cp1z,
+            cdx,
+            cdy,
+            cdz,
+            cyl_r,
+            cyl_r_sq,
         } = v;
 
         let rx = ap1x - cp1x;
@@ -2578,8 +2940,14 @@ pub(crate) mod batch {
         let s_inner = s_gen.select(e.gt(eps), s_ea);
         let s_closest = s_inner.select(a.gt(eps), zero);
         let inv = one / bdot;
-        let s_t0 = ((zero - f) * inv).max(zero).min(one).select(bdot.abs().gt(eps), zero);
-        let s_t1 = ((e - f) * inv).max(zero).min(one).select(bdot.abs().gt(eps), one);
+        let s_t0 = ((zero - f) * inv)
+            .max(zero)
+            .min(one)
+            .select(bdot.abs().gt(eps), zero);
+        let s_t1 = ((e - f) * inv)
+            .max(zero)
+            .min(one)
+            .select(bdot.abs().gt(eps), one);
 
         let combined = cyl_r + cap_r;
         let combined_sq = combined * combined;
@@ -2623,7 +2991,9 @@ pub(crate) mod batch {
             BatchPlan::Simd => {}
         }
         let (bc, br) = q.bounding_sphere();
-        cylinder_vs_capsules_broad_k(
+        // Sample hits are exact point-to-cylinder tests, so a kernel hit is final;
+        // a miss can hide an interior minimum between samples.
+        if cylinder_vs_capsules_broad_k(
             col,
             [bc.x, bc.y, bc.z, br],
             q.p1.to_array(),
@@ -2631,7 +3001,26 @@ pub(crate) mod batch {
             q.rdv,
             q.radius,
             q.dir.dot(q.dir),
-        )
+        ) {
+            return true;
+        }
+        // The capsule of the cylinder's axis and radius contains it, so a
+        // capsule-capsule miss is a sound reject; the ambiguous remainder gets
+        // the exact per-pair test.
+        let a = q.dir.dot(q.dir);
+        if a > f32::EPSILON
+            && !capsule_vs_capsules_broad_k(
+                col,
+                [bc.x, bc.y, bc.z, br],
+                q.p1.to_array(),
+                q.dir.to_array(),
+                q.radius,
+                a,
+            )
+        {
+            return false;
+        }
+        col.shapes.iter().any(|c| q.collides(&c))
     }
 
     /// Query cylinder vs every stored capsule (`p1=0..2`, `dir=3..5`, `radius=6`): the capsule axis
@@ -2676,8 +3065,15 @@ pub(crate) mod batch {
         for (off, cnt, active) in ctx.masked_chunks::<f32>(len) {
             let r = off..off + cnt;
 
-            let [bx, by, bz, br] =
-                ctx.load_partial_n([&b.x()[r.clone()], &b.y()[r.clone()], &b.z()[r.clone()], &b.r()[r.clone()]], 0.0);
+            let [bx, by, bz, br] = ctx.load_partial_n(
+                [
+                    &b.x()[r.clone()],
+                    &b.y()[r.clone()],
+                    &b.z()[r.clone()],
+                    &b.r()[r.clone()],
+                ],
+                0.0,
+            );
             let bdx = qcx - bx;
             let bdy = qcy - by;
             let bdz = qcz - bz;
@@ -2700,13 +3096,31 @@ pub(crate) mod batch {
             );
             let cap_r_sq = cap_r * cap_r;
 
-            let hit = cyl_cap_eval(
-                CylCap {
-                    zero, one, half, four, eps, e, rdvv,
-                    ap1x, ap1y, ap1z, adx, ady, adz, cap_r, cap_r_sq,
-                    cp1x, cp1y, cp1z, cdx, cdy, cdz, cyl_r, cyl_r_sq,
-                },
-            );
+            let hit = cyl_cap_eval(CylCap {
+                zero,
+                one,
+                half,
+                four,
+                eps,
+                e,
+                rdvv,
+                ap1x,
+                ap1y,
+                ap1z,
+                adx,
+                ady,
+                adz,
+                cap_r,
+                cap_r_sq,
+                cp1x,
+                cp1y,
+                cp1z,
+                cdx,
+                cdy,
+                cdz,
+                cyl_r,
+                cyl_r_sq,
+            });
 
             if (hit & active).any() {
                 return true;
@@ -2722,13 +3136,36 @@ pub(crate) mod batch {
             BatchPlan::Simd => {}
         }
         let (bc, br) = q.bounding_sphere();
-        capsule_vs_cylinders_broad_k(
+        // Sample hits are exact point-to-cylinder tests, so a kernel hit is final;
+        // a miss can hide an interior minimum between samples.
+        if capsule_vs_cylinders_broad_k(
             col,
             [bc.x, bc.y, bc.z, br],
             q.p1.to_array(),
             q.dir.to_array(),
             q.radius,
-        )
+        ) {
+            return true;
+        }
+        // Each stored cylinder sits inside the capsule of its axis and radius, and
+        // the cylinder-cylinder kernel's barrel term is exactly that spine test, so
+        // its miss is a sound reject; the ambiguous remainder gets the exact
+        // per-pair test.
+        let a = q.dir.dot(q.dir);
+        if a > f32::EPSILON
+            && !cylinder_vs_cylinders_broad_k(
+                col,
+                [bc.x, bc.y, bc.z, br],
+                q.p1.to_array(),
+                q.dir.to_array(),
+                q.radius,
+                a,
+                q.rdv,
+            )
+        {
+            return false;
+        }
+        col.shapes.iter().any(|c| q.collides(&c))
     }
 
     /// Query capsule vs every stored cylinder (`p1=0..2`, `dir=3..5`, `radius=6`, `rdv=7`): the
@@ -2767,8 +3204,15 @@ pub(crate) mod batch {
         for (off, cnt, active) in ctx.masked_chunks::<f32>(len) {
             let r = off..off + cnt;
 
-            let [bx, by, bz, br] =
-                ctx.load_partial_n([&b.x()[r.clone()], &b.y()[r.clone()], &b.z()[r.clone()], &b.r()[r.clone()]], 0.0);
+            let [bx, by, bz, br] = ctx.load_partial_n(
+                [
+                    &b.x()[r.clone()],
+                    &b.y()[r.clone()],
+                    &b.z()[r.clone()],
+                    &b.r()[r.clone()],
+                ],
+                0.0,
+            );
             let bdx = qcx - bx;
             let bdy = qcy - by;
             let bdz = qcz - bz;
@@ -2793,13 +3237,31 @@ pub(crate) mod batch {
             let cyl_r_sq = cyl_r * cyl_r;
             let e = cdx * cdx + cdy * cdy + cdz * cdz;
 
-            let hit = cyl_cap_eval(
-                CylCap {
-                    zero, one, half, four, eps, e, rdvv,
-                    ap1x, ap1y, ap1z, adx, ady, adz, cap_r, cap_r_sq,
-                    cp1x, cp1y, cp1z, cdx, cdy, cdz, cyl_r, cyl_r_sq,
-                },
-            );
+            let hit = cyl_cap_eval(CylCap {
+                zero,
+                one,
+                half,
+                four,
+                eps,
+                e,
+                rdvv,
+                ap1x,
+                ap1y,
+                ap1z,
+                adx,
+                ady,
+                adz,
+                cap_r,
+                cap_r_sq,
+                cp1x,
+                cp1y,
+                cp1z,
+                cdx,
+                cdy,
+                cdz,
+                cyl_r,
+                cyl_r_sq,
+            });
 
             if (hit & active).any() {
                 return true;
@@ -2837,6 +3299,37 @@ pub(crate) mod batch {
             let lo = (((zero - he[i]) - p0[i]) * inv[i]).max(zero).min(one);
             let hi = ((he[i] - p0[i]) * inv[i]).max(zero).min(one);
             hit = hit | dist_sq(lo).le(rs) | dist_sq(hi).le(rs);
+        }
+        // The squared distance is piecewise quadratic in t with breaks at the face
+        // crossings; a piece with two or three active axis excesses of signs s has
+        // its interior minimum at t = sum dir_i (s_i he_i - p0_i) / sum dir_i^2.
+        // Evaluating every sign combination alongside the breakpoints makes the
+        // sampled minimum exact.
+        for i in 0..3 {
+            for j in (i + 1)..3 {
+                let denom = dir[i] * dir[i] + dir[j] * dir[j];
+                let dinv = (one / denom).select(denom.gt(eps), zero);
+                for si in [-1.0f32, 1.0] {
+                    for sj in [-1.0f32, 1.0] {
+                        let num = (he[i] * si - p0[i]) * dir[i] + (he[j] * sj - p0[j]) * dir[j];
+                        let t = (num * dinv).max(zero).min(one);
+                        hit = hit | dist_sq(t).le(rs);
+                    }
+                }
+            }
+        }
+        let denom = dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2];
+        let dinv = (one / denom).select(denom.gt(eps), zero);
+        for s0 in [-1.0f32, 1.0] {
+            for s1 in [-1.0f32, 1.0] {
+                for s2 in [-1.0f32, 1.0] {
+                    let num = (he[0] * s0 - p0[0]) * dir[0]
+                        + (he[1] * s1 - p0[1]) * dir[1]
+                        + (he[2] * s2 - p0[2]) * dir[2];
+                    let t = (num * dinv).max(zero).min(one);
+                    hit = hit | dist_sq(t).le(rs);
+                }
+            }
         }
         hit
     }
@@ -2882,6 +3375,8 @@ pub(crate) mod batch {
             BatchPlan::Simd => {}
         }
         let (bc, br) = q.bounding_sphere();
+        // The kernel over-approximates the cylinder by its capsule (its segment-box
+        // test is exact), so a miss is final but a hit needs the exact per-pair test.
         cylinder_vs_cuboids_broad_k(
             col,
             [bc.x, bc.y, bc.z, br],
@@ -2889,7 +3384,7 @@ pub(crate) mod batch {
             q.dir.to_array(),
             q.rdv,
             q.radius * q.radius,
-        )
+        ) && col.shapes.iter().any(|c| q.collides(&c))
     }
 
     /// Query cylinder vs every stored cuboid: cylinder axis sampled against the cuboid faces
@@ -2919,15 +3414,26 @@ pub(crate) mod batch {
         let qcy = ctx.splat(qbp[1]);
         let qcz = ctx.splat(qbp[2]);
         let qbr = ctx.splat(qbp[3]);
-        let p1 = [ctx.splat(cylp1[0]), ctx.splat(cylp1[1]), ctx.splat(cylp1[2])];
+        let p1 = [
+            ctx.splat(cylp1[0]),
+            ctx.splat(cylp1[1]),
+            ctx.splat(cylp1[2]),
+        ];
         let cd = [ctx.splat(cyld[0]), ctx.splat(cyld[1]), ctx.splat(cyld[2])];
         let rdvv = ctx.splat(rdv);
 
         for (off, cnt, active) in ctx.masked_chunks::<f32>(len) {
             let r = off..off + cnt;
 
-            let [bx, by, bz, br] =
-                ctx.load_partial_n([&b.x()[r.clone()], &b.y()[r.clone()], &b.z()[r.clone()], &b.r()[r.clone()]], 0.0);
+            let [bx, by, bz, br] = ctx.load_partial_n(
+                [
+                    &b.x()[r.clone()],
+                    &b.y()[r.clone()],
+                    &b.z()[r.clone()],
+                    &b.r()[r.clone()],
+                ],
+                0.0,
+            );
             let bdx = qcx - bx;
             let bdy = qcy - by;
             let bdz = qcz - bz;
@@ -2936,7 +3442,14 @@ pub(crate) mod batch {
                 continue;
             }
 
-            let cen = ctx.load_partial_n([&s.col(0)[r.clone()], &s.col(1)[r.clone()], &s.col(2)[r.clone()]], 0.0);
+            let cen = ctx.load_partial_n(
+                [
+                    &s.col(0)[r.clone()],
+                    &s.col(1)[r.clone()],
+                    &s.col(2)[r.clone()],
+                ],
+                0.0,
+            );
             let ax: [[Varying<f32, _>; 3]; 3] = core::array::from_fn(|i| {
                 core::array::from_fn(|k| ctx.load_partial(&s.col(3 + i * 3 + k)[r.clone()], 0.0))
             });
@@ -2952,7 +3465,9 @@ pub(crate) mod batch {
             let mut hit = cuboid_seg_hit(zero, one, eps, big, p0, dl, he, rs);
             for sg in CUBOID_SIGNS {
                 let off: [Varying<f32, _>; 3] = core::array::from_fn(|k| {
-                    ax[0][k] * (he[0] * sg[0]) + ax[1][k] * (he[1] * sg[1]) + ax[2][k] * (he[2] * sg[2])
+                    ax[0][k] * (he[0] * sg[0])
+                        + ax[1][k] * (he[1] * sg[1])
+                        + ax[2][k] * (he[2] * sg[2])
                 });
                 let corner = [cen[0] + off[0], cen[1] + off[1], cen[2] + off[2]];
                 hit = hit | corner_in_cyl(zero, one, corner, p1, cd, rdvv, rs);
@@ -2981,13 +3496,19 @@ pub(crate) mod batch {
                 + q.axes[2] * (he[2] * sg[2]);
             corners[ci] = [v.x, v.y, v.z];
         }
+        // The kernel over-approximates each cylinder by its capsule (its segment-box
+        // test is exact), so a miss is final but a hit needs the exact per-pair test.
         cuboid_vs_cylinders_broad_k(
             col,
             [q.center.x, q.center.y, q.center.z, br],
-            [q.axes[0].to_array(), q.axes[1].to_array(), q.axes[2].to_array()],
+            [
+                q.axes[0].to_array(),
+                q.axes[1].to_array(),
+                q.axes[2].to_array(),
+            ],
             he,
             corners,
-        )
+        ) && col.shapes.iter().any(|c| q.collides(&c))
     }
 
     /// Query cuboid vs every stored cylinder: companion of `cylinder_vs_cuboids_broad` with the
@@ -3023,8 +3544,15 @@ pub(crate) mod batch {
         for (off, cnt, active) in ctx.masked_chunks::<f32>(len) {
             let r = off..off + cnt;
 
-            let [bx, by, bz, br] =
-                ctx.load_partial_n([&b.x()[r.clone()], &b.y()[r.clone()], &b.z()[r.clone()], &b.r()[r.clone()]], 0.0);
+            let [bx, by, bz, br] = ctx.load_partial_n(
+                [
+                    &b.x()[r.clone()],
+                    &b.y()[r.clone()],
+                    &b.z()[r.clone()],
+                    &b.r()[r.clone()],
+                ],
+                0.0,
+            );
             let bdx = qcx - bx;
             let bdy = qcy - by;
             let bdz = qcz - bz;
@@ -3033,8 +3561,22 @@ pub(crate) mod batch {
                 continue;
             }
 
-            let p1 = ctx.load_partial_n([&s.col(0)[r.clone()], &s.col(1)[r.clone()], &s.col(2)[r.clone()]], 0.0);
-            let cd = ctx.load_partial_n([&s.col(3)[r.clone()], &s.col(4)[r.clone()], &s.col(5)[r.clone()]], 0.0);
+            let p1 = ctx.load_partial_n(
+                [
+                    &s.col(0)[r.clone()],
+                    &s.col(1)[r.clone()],
+                    &s.col(2)[r.clone()],
+                ],
+                0.0,
+            );
+            let cd = ctx.load_partial_n(
+                [
+                    &s.col(3)[r.clone()],
+                    &s.col(4)[r.clone()],
+                    &s.col(5)[r.clone()],
+                ],
+                0.0,
+            );
             let crad = ctx.load_partial(&s.col(6)[r.clone()], 0.0);
             let rs = crad * crad;
             let rdvv = ctx.load_partial(&s.col(7)[r.clone()], 0.0);

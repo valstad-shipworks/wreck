@@ -1,8 +1,8 @@
-use alloc::vec::Vec;
-use core::fmt;
 #[cfg(not(feature = "std"))]
 #[allow(unused_imports)]
 use crate::F32Ext;
+use alloc::vec::Vec;
+use core::fmt;
 
 use glam::{DMat3, DVec3, Vec3};
 use hydroplane::{Gang, GangGlamExt, kernel};
@@ -308,6 +308,15 @@ fn cylinder_capsule_collides<const BROADPHASE: bool>(cyl: &Cylinder, capsule: &C
         }
     }
 
+    // The capsule of the cylinder's axis and radius contains the cylinder, so
+    // spine separation beyond the combined radii separates the real shapes too.
+    let spine_dist_sq =
+        crate::capsule::segment_segment_dist_sq(cyl.p1, cyl.dir, capsule.p1, capsule.dir);
+    let combined = cyl.radius + capsule.radius;
+    if spine_dist_sq > combined * combined {
+        return false;
+    }
+
     // Compute key s-values on the capsule axis
     // s_closest: closest approach between the two axis segments
     let r = capsule.p1 - cyl.p1;
@@ -352,7 +361,27 @@ fn cylinder_capsule_collides<const BROADPHASE: bool>(cyl: &Cylinder, capsule: &C
 
     let samples = [0.0, 1.0, s_closest, s_t0, s_t1, 0.25, 0.5, 0.75];
 
-    cylinder_capsule_eval(samples, capsule.p1, capsule.dir, cyl.p1, cyl.dir, cyl.rdv, cyl.radius, capsule.radius, e)
+    // Each sample is an exact point-to-solid-cylinder test, so a hit is definitive;
+    // a miss can still hide an interior minimum between samples and needs the exact
+    // narrowphase.
+    if cylinder_capsule_eval(
+        samples,
+        capsule.p1,
+        capsule.dir,
+        cyl.p1,
+        cyl.dir,
+        cyl.rdv,
+        cyl.radius,
+        capsule.radius,
+        e,
+    ) {
+        return true;
+    }
+
+    crate::gjk::bodies_collide(
+        &crate::gjk::ConvexBody::cylinder(cyl),
+        &crate::gjk::ConvexBody::capsule(capsule),
+    )
 }
 
 /// Evaluate the cylinder distance at 8 samples along the capsule axis (barrel + both
@@ -467,6 +496,27 @@ fn cylinder_cuboid_collides<const BROADPHASE: bool>(cyl: &Cylinder, cuboid: &Cub
     let he = cuboid.half_extents;
     let rs_sq = cyl.radius * cyl.radius;
 
+    // Face-slab reject: the box's own axes are valid separating axes, and the
+    // cylinder's exact support along each is the axis interval widened by the
+    // cap disc's extent. A degenerate (zero-length) axis leaves the disc
+    // orientation undefined, so it falls back to the full radius.
+    let len_sq = dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2];
+    for i in 0..3 {
+        let (lo, hi) = if dir[i] >= 0.0 {
+            (p0[i], p0[i] + dir[i])
+        } else {
+            (p0[i] + dir[i], p0[i])
+        };
+        let disc = if len_sq > f32::EPSILON {
+            cyl.radius * (1.0 - dir[i] * dir[i] / len_sq).max(0.0).sqrt()
+        } else {
+            cyl.radius
+        };
+        if lo - disc > he[i] || hi + disc < -he[i] {
+            return false;
+        }
+    }
+
     let inv_dir = [
         if dir[0].abs() > f32::EPSILON {
             1.0 / dir[0]
@@ -496,7 +546,15 @@ fn cylinder_cuboid_collides<const BROADPHASE: bool>(cyl: &Cylinder, cuboid: &Cub
         ((he[2] - p0[2]) * inv_dir[2]).clamp(0.0, 1.0),
     ];
 
-    // Test 2: Check 8 cuboid corners against cylinder
+    // Axis-penetration accept: with radius zero the sample set is complete (a
+    // penetrating axis touches the box at one of the entry-face crossings), so
+    // a zero-distance sample proves the cylinder's spine enters the box.
+    if crate::cuboid::capsule_cuboid_eval(ts, Vec3::from(p0), Vec3::from(dir), Vec3::from(he), 0.0)
+    {
+        return true;
+    }
+
+    // Corner accept: any box corner inside the solid cylinder proves collision.
     let mut cx = [0.0f32; 8];
     let mut cy = [0.0f32; 8];
     let mut cz = [0.0f32; 8];
@@ -515,41 +573,14 @@ fn cylinder_cuboid_collides<const BROADPHASE: bool>(cyl: &Cylinder, cuboid: &Cub
             }
         }
     }
+    if cylinder_corners_eval(cx, cy, cz, cyl.p1, cyl.dir, cyl.rdv, rs_sq) {
+        return true;
+    }
 
-    cylinder_cuboid_eval(
-        ts,
-        Vec3::from(p0),
-        Vec3::from(dir),
-        Vec3::from(he),
-        rs_sq,
-        cx,
-        cy,
-        cz,
-        cyl.p1,
-        cyl.dir,
-        cyl.rdv,
+    crate::gjk::bodies_collide(
+        &crate::gjk::ConvexBody::cylinder(cyl),
+        &crate::gjk::ConvexBody::cuboid(cuboid),
     )
-}
-
-/// Barrel/face test (Test 1) and the 8-corner test (Test 2) under a single dispatch: each
-/// sub-test runs on the chosen backend through its `_on` companion.
-#[kernel]
-fn cylinder_cuboid_eval(
-    ctx: Gang,
-    ts: [f32; 8],
-    p0: Vec3,
-    dir: Vec3,
-    he: Vec3,
-    rs_sq: f32,
-    cx: [f32; 8],
-    cy: [f32; 8],
-    cz: [f32; 8],
-    cyl_p1: Vec3,
-    cyl_dir: Vec3,
-    rdv: f32,
-) -> bool {
-    crate::cuboid::capsule_cuboid_eval_on(ctx, ts, p0, dir, he, rs_sq)
-        || cylinder_corners_eval_on(ctx, cx, cy, cz, cyl_p1, cyl_dir, rdv, rs_sq)
 }
 
 /// Are any of the 8 cuboid corners inside the cylinder barrel? A `lane < cnt` mask drops the
@@ -572,7 +603,14 @@ fn cylinder_corners_eval(
     let dv = ctx.splat_vec3(cyl_dir);
 
     for (off, cnt, active) in ctx.masked_chunks::<f32>(8) {
-        let w = ctx.load_partial_vec3([&cx[off..off + cnt], &cy[off..off + cnt], &cz[off..off + cnt]], 0.0) - p1v;
+        let w = ctx.load_partial_vec3(
+            [
+                &cx[off..off + cnt],
+                &cy[off..off + cnt],
+                &cz[off..off + cnt],
+            ],
+            0.0,
+        ) - p1v;
 
         let t = w.dot(dv) * rdv;
         let in_slab = zero.le(t) & t.le(one);
@@ -615,33 +653,21 @@ impl Collides<Cylinder> for Cylinder {
             }
         }
 
-        // Check axis-axis closest approach (barrel-barrel)
+        // Each cylinder sits inside the capsule of its axis and radius, so spine
+        // separation beyond the combined radii separates the cylinders. Spine
+        // proximity alone proves nothing (the capsule's endcap bulge is not part
+        // of the cylinder), so the rest is decided exactly.
         let dist_sq =
             crate::capsule::segment_segment_dist_sq(self.p1, self.dir, other.p1, other.dir);
         let combined = self.radius + other.radius;
-        if dist_sq <= combined * combined {
-            // Need to verify closest approach is in barrel region of both cylinders
-            // The segment-segment distance already clamps to [0,1] on both,
-            // so if the distance is within combined radii, the barrels overlap.
-            return true;
+        if dist_sq > combined * combined {
+            return false;
         }
 
-        // Check end caps: sample 5 points on each cylinder against the other
-        for cyl_a in [self, other] {
-            let cyl_b = if core::ptr::eq(cyl_a, self) {
-                other
-            } else {
-                self
-            };
-            for &t in &[0.0f32, 0.25, 0.5, 0.75, 1.0] {
-                let p = cyl_a.p1 + cyl_a.dir * t;
-                if cyl_b.point_dist_sq(p) <= cyl_a.radius * cyl_a.radius {
-                    return true;
-                }
-            }
-        }
-
-        false
+        crate::gjk::bodies_collide(
+            &crate::gjk::ConvexBody::cylinder(self),
+            &crate::gjk::ConvexBody::cylinder(other),
+        )
     }
 }
 
@@ -864,13 +890,19 @@ impl Collides<ConvexPolygon> for Cylinder {
             }
         }
 
-        // Check cylinder axis vs polygon (capsule-like distance)
+        // Axis-to-polygon distance beyond the radius separates even the capsule
+        // around the axis, which contains the cylinder. Within the radius only
+        // the capsule is proven to hit — the cylinder's flat caps may still
+        // clear the polygon — so the exact narrowphase decides.
         let dist_sq = polygon.parametric_line_dist_sq(self.p1, self.dir, 0.0, 1.0);
-        if dist_sq <= self.radius * self.radius {
-            return true;
+        if dist_sq > self.radius * self.radius {
+            return false;
         }
 
-        false
+        crate::gjk::bodies_collide(
+            &crate::gjk::ConvexBody::cylinder(self),
+            &crate::gjk::ConvexBody::hull(&polygon.vertices_3d),
+        )
     }
 }
 
@@ -914,7 +946,9 @@ impl Collides<ConvexPolytope> for Cylinder {
             }
         }
 
-        // SAT: cylinder support function against polytope planes
+        // SAT reject over the polytope's face planes with the cylinder's exact
+        // support. This axis set is incomplete (no cylinder-cap or edge-cross
+        // axes), so surviving it proves nothing — the exact narrowphase decides.
         let dir_sq = self.dir.dot(self.dir);
         if dir_sq > f32::EPSILON {
             let cyl_len = dir_sq.sqrt();
@@ -934,7 +968,10 @@ impl Collides<ConvexPolytope> for Cylinder {
             }
         }
 
-        true
+        crate::gjk::bodies_collide(
+            &crate::gjk::ConvexBody::cylinder(self),
+            &crate::gjk::ConvexBody::hull(&polytope.vertices),
+        )
     }
 }
 

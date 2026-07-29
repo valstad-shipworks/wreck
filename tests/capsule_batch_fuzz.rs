@@ -52,5 +52,8 @@ fn capsule_vs_capsule_collection_matches_scalar() {
         }
     }
     // sanity: the fuzz space actually exercises both outcomes
-    assert!(hits > 1000, "too few positive cases ({hits}) — fuzz not covering hits");
+    assert!(
+        hits > 1000,
+        "too few positive cases ({hits}) — fuzz not covering hits"
+    );
 }

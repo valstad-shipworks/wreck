@@ -1,8 +1,8 @@
-use alloc::vec::Vec;
-use core::fmt;
 #[cfg(not(feature = "std"))]
 #[allow(unused_imports)]
 use crate::F32Ext;
+use alloc::vec::Vec;
+use core::fmt;
 
 use glam::{DMat3, DVec3, Vec3};
 use hydroplane::{Gang, GangGlamExt, kernel};
@@ -348,8 +348,8 @@ fn capsule_cuboid_za_aa(capsule: &Capsule, cuboid: &Cuboid) -> bool {
 }
 
 // Capsule-Cuboid collision
-// Evaluate all 8 candidate t-values (2 endpoints + 6 face-plane intersections)
-// in a single SIMD pass.
+// Evaluate the 28 candidate t-values (endpoints, face-plane crossings, and the
+// active-set quadratic vertices) in a single SIMD pass.
 #[inline]
 fn capsule_cuboid_collides<const BROADPHASE: bool>(capsule: &Capsule, cuboid: &Cuboid) -> bool {
     // Bounding sphere early-out
@@ -414,26 +414,116 @@ fn capsule_cuboid_collides<const BROADPHASE: bool>(capsule: &Capsule, cuboid: &C
         },
     ];
 
-    let ts = [
-        0.0,
-        1.0,
-        ((-he[0] - p0[0]) * inv_dir[0]).clamp(0.0, 1.0),
-        ((he[0] - p0[0]) * inv_dir[0]).clamp(0.0, 1.0),
-        ((-he[1] - p0[1]) * inv_dir[1]).clamp(0.0, 1.0),
-        ((he[1] - p0[1]) * inv_dir[1]).clamp(0.0, 1.0),
-        ((-he[2] - p0[2]) * inv_dir[2]).clamp(0.0, 1.0),
-        ((he[2] - p0[2]) * inv_dir[2]).clamp(0.0, 1.0),
-    ];
+    // Face-slab reject: the box's own axes are valid separating axes, and in the
+    // local frame each one is a 1D interval test against the capsule's projection.
+    for i in 0..3 {
+        let (lo, hi) = if dir[i] >= 0.0 {
+            (p0[i], p0[i] + dir[i])
+        } else {
+            (p0[i] + dir[i], p0[i])
+        };
+        if lo - capsule.radius > he[i] || hi + capsule.radius < -he[i] {
+            return false;
+        }
+    }
 
-    capsule_cuboid_eval(ts, Vec3::from(p0), Vec3::from(dir), Vec3::from(he), rs_sq)
+    let mut ts = [0.0f32; 28];
+    ts[1] = 1.0;
+    for i in 0..3 {
+        ts[2 + 2 * i] = ((-he[i] - p0[i]) * inv_dir[i]).clamp(0.0, 1.0);
+        ts[3 + 2 * i] = ((he[i] - p0[i]) * inv_dir[i]).clamp(0.0, 1.0);
+    }
+    // The squared segment-to-box distance is piecewise quadratic in t with breaks
+    // at the face crossings; on a piece with two or three active axis excesses of
+    // signs s the interior minimum sits at the vertex
+    // t = sum dir_i (s_i he_i - p0_i) / sum dir_i^2, so evaluating every sign
+    // combination alongside the breakpoints covers the true minimum exactly.
+    let mut k = 8;
+    for i in 0..3 {
+        for j in (i + 1)..3 {
+            let denom = dir[i] * dir[i] + dir[j] * dir[j];
+            let inv = if denom > f32::EPSILON {
+                1.0 / denom
+            } else {
+                0.0
+            };
+            for si in [-1.0f32, 1.0] {
+                for sj in [-1.0f32, 1.0] {
+                    let num = dir[i] * (si * he[i] - p0[i]) + dir[j] * (sj * he[j] - p0[j]);
+                    ts[k] = (num * inv).clamp(0.0, 1.0);
+                    k += 1;
+                }
+            }
+        }
+    }
+    let denom = dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2];
+    let inv = if denom > f32::EPSILON {
+        1.0 / denom
+    } else {
+        0.0
+    };
+    for s0 in [-1.0f32, 1.0] {
+        for s1 in [-1.0f32, 1.0] {
+            for s2 in [-1.0f32, 1.0] {
+                let num = dir[0] * (s0 * he[0] - p0[0])
+                    + dir[1] * (s1 * he[1] - p0[1])
+                    + dir[2] * (s2 * he[2] - p0[2]);
+                ts[k] = (num * inv).clamp(0.0, 1.0);
+                k += 1;
+            }
+        }
+    }
+
+    capsule_cuboid_eval_exact(ts, Vec3::from(p0), Vec3::from(dir), Vec3::from(he), rs_sq)
 }
 
-/// Squared distance from the capsule axis (sampled at the 8 candidate `t`s) to the
-/// cuboid, branchless: `excess = max(0, |p0 + dir·t| - he)` per axis. A hit if any sample
-/// lies within the capsule radius. An explicit `lane < cnt` mask drops the inactive tail
-/// lanes a wider backend may add.
+/// Squared distance from the capsule axis to the cuboid over the full 28-candidate
+/// set (2 endpoints, 6 face crossings, 12 two-axis and 8 three-axis quadratic
+/// vertices), branchless: `excess = max(0, |p0 + dir·t| - he)` per axis. The
+/// candidate set covers every piecewise minimum, so a miss here is exact. An
+/// explicit `lane < cnt` mask drops the inactive tail lanes a wider backend may add.
 #[kernel]
-pub(crate) fn capsule_cuboid_eval(ctx: Gang, ts: [f32; 8], p0: Vec3, dir: Vec3, he: Vec3, rs_sq: f32) -> bool {
+pub(crate) fn capsule_cuboid_eval_exact(
+    ctx: Gang,
+    ts: [f32; 28],
+    p0: Vec3,
+    dir: Vec3,
+    he: Vec3,
+    rs_sq: f32,
+) -> bool {
+    let rs = ctx.splat(rs_sq);
+    let zero = ctx.splat(0.0);
+    let p0v = ctx.splat_vec3(p0);
+    let dv = ctx.splat_vec3(dir);
+    let [hx, hy, hz] = ctx.splat_vec3(he).0;
+    for (off, cnt, active) in ctx.masked_chunks::<f32>(28) {
+        let t = ctx.load_partial(&ts[off..off + cnt], 0.0);
+        let [px, py, pz] = p0v.add_scaled(dv, t).0;
+        let ex = (px.abs() - hx).max(zero);
+        let ey = (py.abs() - hy).max(zero);
+        let ez = (pz.abs() - hz).max(zero);
+        let dist_sq = ex * ex + ey * ey + ez * ez;
+        if (dist_sq.le(rs) & active).any() {
+            return true;
+        }
+    }
+    false
+}
+
+/// Squared distance from the capsule axis (sampled at the 8 breakpoint `t`s) to the
+/// cuboid, branchless: `excess = max(0, |p0 + dir·t| - he)` per axis. A hit if any sample
+/// lies within the capsule radius; with a zero radius the breakpoints are a complete
+/// candidate set, so the result is exact. An explicit `lane < cnt` mask drops the
+/// inactive tail lanes a wider backend may add.
+#[kernel]
+pub(crate) fn capsule_cuboid_eval(
+    ctx: Gang,
+    ts: [f32; 8],
+    p0: Vec3,
+    dir: Vec3,
+    he: Vec3,
+    rs_sq: f32,
+) -> bool {
     let rs = ctx.splat(rs_sq);
     let zero = ctx.splat(0.0);
     let p0v = ctx.splat_vec3(p0);

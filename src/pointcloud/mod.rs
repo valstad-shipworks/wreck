@@ -8,7 +8,6 @@ use glam::Vec3;
 use hydroplane::{Gang, GangGlamExt, Vec3Wide, kernel};
 use inherent::inherent;
 
-
 use crate::Bounded;
 use crate::Collides;
 use crate::ConvexPolytope;
@@ -141,9 +140,7 @@ impl Scalable for Pointcloud {
         let xs = self.spheres.x();
         let ys = self.spheres.y();
         let zs = self.spheres.z();
-        let points: Vec<[f32; 3]> = (0..n)
-            .map(|i| [xs[i], ys[i], zs[i]])
-            .collect();
+        let points: Vec<[f32; 3]> = (0..n).map(|i| [xs[i], ys[i], zs[i]]).collect();
         self.tree = capt::Capt::<3, f32, u32>::with_point_radius(
             &points,
             self.r_range,
@@ -199,7 +196,20 @@ impl Collides<Sphere> for Pointcloud {
             Some(inv) => Vec3::from(inv.transform_point3a(glam::Vec3A::from(sphere.center))),
             None => sphere.center,
         };
-        self.tree.query_simd(&center.to_array(), sphere.radius)
+        if self.broadphase_reject_sound(sphere.radius) {
+            return self.tree.query_simd(&center.to_array(), sphere.radius);
+        }
+        // The query ball exceeds the tree's construction bound, where the CAPT can
+        // miss points in sibling leaves; scan every point instead.
+        capsule_pcl_k(
+            self.spheres.x(),
+            self.spheres.y(),
+            self.spheres.z(),
+            center,
+            Vec3::ZERO,
+            0.0,
+            sphere.radius + self.point_radius,
+        )
     }
 }
 
@@ -240,12 +250,23 @@ impl Collides<Capsule> for Pointcloud {
             capsule
         };
         let (bc, br) = capsule.bounding_sphere();
-        if BROADPHASE && self.broadphase_reject_sound(br) && !self.tree.query_simd(&bc.to_array(), br) {
+        if BROADPHASE
+            && self.broadphase_reject_sound(br)
+            && !self.tree.query_simd(&bc.to_array(), br)
+        {
             return false;
         }
 
         let r_total = capsule.radius + self.point_radius;
-        capsule_pcl_k(self.spheres.x(), self.spheres.y(), self.spheres.z(), capsule.p1, capsule.dir, capsule.rdv, r_total)
+        capsule_pcl_k(
+            self.spheres.x(),
+            self.spheres.y(),
+            self.spheres.z(),
+            capsule.p1,
+            capsule.dir,
+            capsule.rdv,
+            r_total,
+        )
     }
 }
 
@@ -271,7 +292,10 @@ impl Collides<Cuboid> for Pointcloud {
             cuboid
         };
         let br = cuboid.bounding_sphere_radius();
-        if BROADPHASE && self.broadphase_reject_sound(br) && !self.tree.query_simd(&cuboid.center.to_array(), br) {
+        if BROADPHASE
+            && self.broadphase_reject_sound(br)
+            && !self.tree.query_simd(&cuboid.center.to_array(), br)
+        {
             return false;
         }
 
@@ -308,7 +332,10 @@ impl Collides<Cylinder> for Pointcloud {
             cyl
         };
         let (bc, br) = cyl.bounding_sphere();
-        if BROADPHASE && self.broadphase_reject_sound(br) && !self.tree.query_simd(&bc.to_array(), br) {
+        if BROADPHASE
+            && self.broadphase_reject_sound(br)
+            && !self.tree.query_simd(&bc.to_array(), br)
+        {
             return false;
         }
 
@@ -344,17 +371,53 @@ impl Pointcloud {
     ) -> bool {
         // Broadphase: polytope OBB bounding sphere vs CAPT
         let br = polytope.obb.bounding_sphere_radius();
-        if BROADPHASE && self.broadphase_reject_sound(br) && !self.tree.query_simd(&polytope.obb.center.to_array(), br) {
+        if BROADPHASE
+            && self.broadphase_reject_sound(br)
+            && !self.tree.query_simd(&polytope.obb.center.to_array(), br)
+        {
             return false;
         }
 
-        polytope_pcl_k(
+        if !polytope_pcl_k(
             self.spheres.x(),
             self.spheres.y(),
             self.spheres.z(),
             polytope.planes,
             self.point_radius,
-        )
+        ) {
+            return false;
+        }
+        if self.point_radius == 0.0 {
+            return true;
+        }
+
+        // With a point radius the plane test models the inflated polytope with
+        // sharp corners, over-reporting near edges and vertices; confirm some
+        // point's true distance. Points strictly inside all planes need no
+        // confirmation, and points beyond any plane by more than the radius
+        // cannot be within it of the polytope.
+        let xs = self.spheres.x();
+        let ys = self.spheres.y();
+        let zs = self.spheres.z();
+        for i in 0..self.point_count() {
+            let p = Vec3::new(xs[i], ys[i], zs[i]);
+            let mut max_sep = f32::NEG_INFINITY;
+            for &(n, d) in polytope.planes {
+                max_sep = max_sep.max(n.dot(p) - d);
+            }
+            if max_sep <= 0.0 {
+                return true;
+            }
+            if max_sep <= self.point_radius
+                && crate::gjk::bodies_collide(
+                    &crate::gjk::ConvexBody::point_with_margin(p, self.point_radius),
+                    &crate::gjk::ConvexBody::hull(polytope.vertices),
+                )
+            {
+                return true;
+            }
+        }
+        false
     }
 }
 
@@ -409,7 +472,13 @@ impl Collides<Plane> for Pointcloud {
             None => (plane.normal, plane.d),
         };
 
-        plane_pcl_k(self.spheres.x(), self.spheres.y(), self.spheres.z(), normal, d + self.point_radius)
+        plane_pcl_k(
+            self.spheres.x(),
+            self.spheres.y(),
+            self.spheres.z(),
+            normal,
+            d + self.point_radius,
+        )
     }
 }
 
@@ -433,7 +502,13 @@ impl Collides<ConvexPolygon> for Pointcloud {
 
         let r_sq = self.point_radius * self.point_radius;
         let poly = RefConvexPolygon::from_heap(polygon.as_ref());
-        polygon_pcl_k(self.spheres.x(), self.spheres.y(), self.spheres.z(), poly, r_sq)
+        polygon_pcl_k(
+            self.spheres.x(),
+            self.spheres.y(),
+            self.spheres.z(),
+            poly,
+            r_sq,
+        )
     }
 }
 
@@ -452,7 +527,8 @@ macro_rules! impl_line_pcl {
             fn test<const BROADPHASE: bool>(&self, line: &$LineType) -> bool {
                 let (origin, dir, rdv) = match &self.inverse_transform {
                     Some(inv) => {
-                        let o = Vec3::from(inv.transform_point3a(glam::Vec3A::from(line.origin_())));
+                        let o =
+                            Vec3::from(inv.transform_point3a(glam::Vec3A::from(line.origin_())));
                         let d = Vec3::from(inv.matrix3 * glam::Vec3A::from(line.dir_()));
                         let len_sq = d.dot(d);
                         let rdv = if len_sq > f32::EPSILON {
@@ -541,13 +617,22 @@ impl Collides<Pointcloud> for Pointcloud {
             return false;
         }
 
-        let (iter_cloud, tree_cloud) = if self.point_count() <= other.point_count() {
+        let combined_radius = self.point_radius + other.point_radius;
+
+        let (mut iter_cloud, mut tree_cloud) = if self.point_count() <= other.point_count() {
             (self, other)
         } else {
             (other, self)
         };
-
-        let combined_radius = iter_cloud.point_radius + tree_cloud.point_radius;
+        // The CAPT only answers soundly while the query ball stays within its
+        // construction bound; prefer whichever orientation satisfies that, and
+        // fall back to a full SIMD point scan when neither does.
+        if !tree_cloud.broadphase_reject_sound(combined_radius)
+            && iter_cloud.broadphase_reject_sound(combined_radius)
+        {
+            core::mem::swap(&mut iter_cloud, &mut tree_cloud);
+        }
+        let tree_sound = tree_cloud.broadphase_reject_sound(combined_radius);
 
         let transform = match (&iter_cloud.inverse_transform, &tree_cloud.inverse_transform) {
             (None, None) => None,
@@ -561,24 +646,29 @@ impl Collides<Pointcloud> for Pointcloud {
         let szs = iter_cloud.spheres.z();
         let n = iter_cloud.point_count();
 
-        if let Some(mat) = &transform {
-            for i in 0..n {
-                let tp = mat.transform_point3a(glam::Vec3A::new(sxs[i], sys[i], szs[i]));
-                if tree_cloud
-                    .tree
-                    .query_simd(&[tp.x, tp.y, tp.z], combined_radius)
-                {
-                    return true;
+        for i in 0..n {
+            let p = match &transform {
+                Some(mat) => {
+                    let tp = mat.transform_point3a(glam::Vec3A::new(sxs[i], sys[i], szs[i]));
+                    Vec3::new(tp.x, tp.y, tp.z)
                 }
-            }
-        } else {
-            for i in 0..n {
-                if tree_cloud
-                    .tree
-                    .query_simd(&[sxs[i], sys[i], szs[i]], combined_radius)
-                {
-                    return true;
-                }
+                None => Vec3::new(sxs[i], sys[i], szs[i]),
+            };
+            let hit = if tree_sound {
+                tree_cloud.tree.query_simd(&p.to_array(), combined_radius)
+            } else {
+                capsule_pcl_k(
+                    tree_cloud.spheres.x(),
+                    tree_cloud.spheres.y(),
+                    tree_cloud.spheres.z(),
+                    p,
+                    Vec3::ZERO,
+                    0.0,
+                    combined_radius,
+                )
+            };
+            if hit {
+                return true;
             }
         }
 
@@ -733,11 +823,20 @@ fn polytope_pcl_k<'a>(
 }
 
 #[kernel]
-fn plane_pcl_k<'a>(ctx: Gang, xs: &'a [f32], ys: &'a [f32], zs: &'a [f32], normal: Vec3, threshold: f32) -> bool {
+fn plane_pcl_k<'a>(
+    ctx: Gang,
+    xs: &'a [f32],
+    ys: &'a [f32],
+    zs: &'a [f32],
+    normal: Vec3,
+    threshold: f32,
+) -> bool {
     let n = ctx.splat_vec3(normal);
     let thr = ctx.splat(threshold);
 
-    ctx.any_n([xs, ys, zs], |[x, y, z]| n.dot(Vec3Wide::from([x, y, z])).le(thr))
+    ctx.any_n([xs, ys, zs], |[x, y, z]| {
+        n.dot(Vec3Wide::from([x, y, z])).le(thr)
+    })
 }
 
 /// Line/Ray/Segment narrowphase: is any cloud point within `point_radius` of the line?
@@ -774,7 +873,14 @@ fn line_pcl_k<'a>(
 /// `(u, v)` plane. Edge count is tiny (3–8) and loop-invariant, so the per-edge inner loops stay in
 /// registers and unroll.
 #[kernel]
-fn polygon_pcl_k<'a>(ctx: Gang, xs: &'a [f32], ys: &'a [f32], zs: &'a [f32], poly: RefConvexPolygon<'a>, r_sq: f32) -> bool {
+fn polygon_pcl_k<'a>(
+    ctx: Gang,
+    xs: &'a [f32],
+    ys: &'a [f32],
+    zs: &'a [f32],
+    poly: RefConvexPolygon<'a>,
+    r_sq: f32,
+) -> bool {
     let center = ctx.splat_vec3(poly.center);
     let normal = ctx.splat_vec3(poly.normal);
     let u_axis = ctx.splat_vec3(poly.u_axis);
@@ -813,7 +919,11 @@ fn polygon_pcl_k<'a>(ctx: Gang, xs: &'a [f32], ys: &'a [f32], zs: &'a [f32], pol
             let dx = vs[j][0] - ax;
             let dy = vs[j][1] - ay;
             let len_sq = dx * dx + dy * dy;
-            let inv = if len_sq > f32::EPSILON { 1.0 / len_sq } else { 0.0 };
+            let inv = if len_sq > f32::EPSILON {
+                1.0 / len_sq
+            } else {
+                0.0
+            };
             let t = (((u - ax) * dx + (v - ay) * dy) * inv).max(zero).min(one);
             let ddx = u - (t * dx + ax);
             let ddy = v - (t * dy + ay);
@@ -842,7 +952,9 @@ fn point_bounds_k<'a>(ctx: Gang, xs: &'a [f32], ys: &'a [f32], zs: &'a [f32]) ->
 
     let mut i = 0;
     while i + n <= len {
-        let [x, y, z] = ctx.load_vec3([&xs[i..i + n], &ys[i..i + n], &zs[i..i + n]]).0;
+        let [x, y, z] = ctx
+            .load_vec3([&xs[i..i + n], &ys[i..i + n], &zs[i..i + n]])
+            .0;
         mnx = mnx.min(x);
         mny = mny.min(y);
         mnz = mnz.min(z);
@@ -853,7 +965,9 @@ fn point_bounds_k<'a>(ctx: Gang, xs: &'a [f32], ys: &'a [f32], zs: &'a [f32]) ->
     }
     if i < len {
         let active = ctx.active_mask(len - i);
-        let [x, y, z] = ctx.load_partial_vec3([&xs[i..len], &ys[i..len], &zs[i..len]], 0.0).0;
+        let [x, y, z] = ctx
+            .load_partial_vec3([&xs[i..len], &ys[i..len], &zs[i..len]], 0.0)
+            .0;
         mnx = mnx.min(x.select(active, pinf));
         mny = mny.min(y.select(active, pinf));
         mnz = mnz.min(z.select(active, pinf));
@@ -879,9 +993,17 @@ mod polygon_pcl_fuzz {
     use rand::{Rng, SeedableRng, rngs::SmallRng};
 
     fn rand_poly(rng: &mut SmallRng) -> ConvexPolygon {
-        let center = Vec3::new(rng.random_range(-3.0..3.0), rng.random_range(-3.0..3.0), rng.random_range(-3.0..3.0));
-        let normal = Vec3::new(rng.random_range(-1.0..1.0), rng.random_range(-1.0..1.0), rng.random_range(-1.0..1.0))
-            .normalize_or(Vec3::Y);
+        let center = Vec3::new(
+            rng.random_range(-3.0..3.0),
+            rng.random_range(-3.0..3.0),
+            rng.random_range(-3.0..3.0),
+        );
+        let normal = Vec3::new(
+            rng.random_range(-1.0..1.0),
+            rng.random_range(-1.0..1.0),
+            rng.random_range(-1.0..1.0),
+        )
+        .normalize_or(Vec3::Y);
         let m = rng.random_range(3..=8usize);
         let radius = rng.random_range(0.3..2.0);
         let verts: Vec<[f32; 2]> = (0..m)
@@ -904,7 +1026,11 @@ mod polygon_pcl_fuzz {
             let pts: Vec<[f32; 3]> = (0..n)
                 .map(|_| {
                     let p = poly.center
-                        + Vec3::new(rng.random_range(-2.5..2.5), rng.random_range(-2.5..2.5), rng.random_range(-2.5..2.5));
+                        + Vec3::new(
+                            rng.random_range(-2.5..2.5),
+                            rng.random_range(-2.5..2.5),
+                            rng.random_range(-2.5..2.5),
+                        );
                     [p.x, p.y, p.z]
                 })
                 .collect();
@@ -912,8 +1038,16 @@ mod polygon_pcl_fuzz {
             let pcl = Pointcloud::new(&pts, (pr, pr), pr);
 
             let r_sq = pcl.point_radius * pcl.point_radius;
-            let expected = pts.iter().any(|&p| refp.point_dist_sq(Vec3::from(p)) <= r_sq);
-            assert_eq!(pcl.collides(&poly), expected, "center {:?} pr {}", poly.center, pcl.point_radius);
+            let expected = pts
+                .iter()
+                .any(|&p| refp.point_dist_sq(Vec3::from(p)) <= r_sq);
+            assert_eq!(
+                pcl.collides(&poly),
+                expected,
+                "center {:?} pr {}",
+                poly.center,
+                pcl.point_radius
+            );
         }
     }
 
@@ -927,12 +1061,22 @@ mod polygon_pcl_fuzz {
         for _ in 0..600 {
             let n = rng.random_range(4..80usize);
             let pts: Vec<[f32; 3]> = (0..n)
-                .map(|_| [rng.random_range(-5.0..5.0), rng.random_range(-5.0..5.0), rng.random_range(-5.0..5.0)])
+                .map(|_| {
+                    [
+                        rng.random_range(-5.0..5.0),
+                        rng.random_range(-5.0..5.0),
+                        rng.random_range(-5.0..5.0),
+                    ]
+                })
                 .collect();
             let pr = rng.random_range(0.05..0.4);
             let pcl = Pointcloud::new(&pts, (pr, pr), pr);
 
-            let c = Vec3::new(rng.random_range(-5.0..5.0), rng.random_range(-5.0..5.0), rng.random_range(-5.0..5.0));
+            let c = Vec3::new(
+                rng.random_range(-5.0..5.0),
+                rng.random_range(-5.0..5.0),
+                rng.random_range(-5.0..5.0),
+            );
             let seg = Vec3::new(rng_ext(&mut rng), rng_ext(&mut rng), rng_ext(&mut rng));
 
             let cap = Capsule::new(c, c + seg, rng.random_range(0.2..2.5));
@@ -942,7 +1086,11 @@ mod polygon_pcl_fuzz {
                 "capsule broadphase flipped"
             );
 
-            let he = [rng.random_range(0.2..2.5), rng.random_range(0.2..2.5), rng.random_range(0.2..2.5)];
+            let he = [
+                rng.random_range(0.2..2.5),
+                rng.random_range(0.2..2.5),
+                rng.random_range(0.2..2.5),
+            ];
             let cub = Cuboid::new(c, [Vec3::X, Vec3::Y, Vec3::Z], he);
             assert_eq!(
                 Collides::<Cuboid>::test::<true>(&pcl, &cub),

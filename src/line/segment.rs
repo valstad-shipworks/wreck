@@ -105,12 +105,7 @@ impl Stretchable for LineSegment {
         let v_axis = u_axis.cross(normal);
 
         let center = p1 + (dir + translation) * 0.5;
-        let corners = [
-            p1,
-            p1 + dir,
-            p1 + dir + translation,
-            p1 + translation,
-        ];
+        let corners = [p1, p1 + dir, p1 + dir + translation, p1 + translation];
 
         let verts_2d: Vec<[f32; 2]> = corners
             .iter()

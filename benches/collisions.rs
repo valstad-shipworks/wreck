@@ -1410,7 +1410,12 @@ fn bench_collider_spheres_small(c: &mut Criterion) {
 fn bench_collider_capsules(c: &mut Criterion) {
     let mut rng = SmallRng::seed_from_u64(42);
     let pairs: Vec<_> = (0..N_PAIRS)
-        .map(|_| (capsule_collider(&mut rng, 16), capsule_collider(&mut rng, 16)))
+        .map(|_| {
+            (
+                capsule_collider(&mut rng, 16),
+                capsule_collider(&mut rng, 16),
+            )
+        })
         .collect();
     c.bench_function("collider_capsules_16", |b| {
         b.iter(|| {
@@ -1439,14 +1444,22 @@ fn dense_cuboid_collider(rng: &mut SmallRng, n: usize) -> Collider {
     let mut c = Collider::new();
     for _ in 0..n {
         let center = rand_vec3(rng, 2.0);
-        let he = [rng.random_range(0.04..0.1), rng.random_range(0.04..0.1), rng.random_range(0.04..0.1)];
+        let he = [
+            rng.random_range(0.04..0.1),
+            rng.random_range(0.04..0.1),
+            rng.random_range(0.04..0.1),
+        ];
         let quat = glam::Quat::from_euler(
             glam::EulerRot::XYZ,
             rng.random_range(0.0..std::f32::consts::TAU),
             rng.random_range(0.0..std::f32::consts::TAU),
             rng.random_range(0.0..std::f32::consts::TAU),
         );
-        c.add(Cuboid::new(center, [quat * Vec3::X, quat * Vec3::Y, quat * Vec3::Z], he));
+        c.add(Cuboid::new(
+            center,
+            [quat * Vec3::X, quat * Vec3::Y, quat * Vec3::Z],
+            he,
+        ));
     }
     c
 }
@@ -1454,7 +1467,12 @@ fn dense_cuboid_collider(rng: &mut SmallRng, n: usize) -> Collider {
 fn bench_collider_dense_capsules(c: &mut Criterion) {
     let mut rng = SmallRng::seed_from_u64(7);
     let pairs: Vec<_> = (0..N_PAIRS)
-        .map(|_| (dense_capsule_collider(&mut rng, 16), dense_capsule_collider(&mut rng, 16)))
+        .map(|_| {
+            (
+                dense_capsule_collider(&mut rng, 16),
+                dense_capsule_collider(&mut rng, 16),
+            )
+        })
         .collect();
     c.bench_function("collider_dense_capsules_16", |b| {
         b.iter(|| {
@@ -1472,7 +1490,12 @@ fn bench_collider_dense_capsules(c: &mut Criterion) {
 fn bench_collider_dense_cuboids(c: &mut Criterion) {
     let mut rng = SmallRng::seed_from_u64(7);
     let pairs: Vec<_> = (0..N_PAIRS)
-        .map(|_| (dense_cuboid_collider(&mut rng, 16), dense_cuboid_collider(&mut rng, 16)))
+        .map(|_| {
+            (
+                dense_cuboid_collider(&mut rng, 16),
+                dense_cuboid_collider(&mut rng, 16),
+            )
+        })
         .collect();
     c.bench_function("collider_dense_cuboids_16", |b| {
         b.iter(|| {
@@ -1541,7 +1564,12 @@ fn cylinder_collider(rng: &mut SmallRng, n: usize) -> Collider {
 fn bench_collider_cross_capsule_cuboid(c: &mut Criterion) {
     let mut rng = SmallRng::seed_from_u64(42);
     let pairs: Vec<_> = (0..N_PAIRS)
-        .map(|_| (capsule_collider(&mut rng, 16), cuboid_collider(&mut rng, 16)))
+        .map(|_| {
+            (
+                capsule_collider(&mut rng, 16),
+                cuboid_collider(&mut rng, 16),
+            )
+        })
         .collect();
     c.bench_function("collider_cross_capsule_cuboid_16", |b| {
         b.iter(|| {
@@ -1577,7 +1605,12 @@ fn bench_collider_cuboids(c: &mut Criterion) {
 fn bench_collider_cylinders(c: &mut Criterion) {
     let mut rng = SmallRng::seed_from_u64(42);
     let pairs: Vec<_> = (0..N_PAIRS)
-        .map(|_| (cylinder_collider(&mut rng, 16), cylinder_collider(&mut rng, 16)))
+        .map(|_| {
+            (
+                cylinder_collider(&mut rng, 16),
+                cylinder_collider(&mut rng, 16),
+            )
+        })
         .collect();
     c.bench_function("collider_cylinders_16", |b| {
         b.iter(|| {

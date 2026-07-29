@@ -1,8 +1,8 @@
-use alloc::vec::Vec;
-use core::fmt;
 #[cfg(not(feature = "std"))]
 #[allow(unused_imports)]
 use crate::F32Ext;
+use alloc::vec::Vec;
+use core::fmt;
 
 use glam::Vec3;
 
@@ -503,7 +503,13 @@ impl fmt::Display for ConvexPolygon {
         write!(
             f,
             "ConvexPolygon(center: [{}, {}, {}], normal: [{}, {}, {}], vertices: {})",
-            c.x, c.y, c.z, n.x, n.y, n.z, self.vertices_2d.len()
+            c.x,
+            c.y,
+            c.z,
+            n.x,
+            n.y,
+            n.z,
+            self.vertices_2d.len()
         )
     }
 }

@@ -4,8 +4,8 @@ pub(crate) mod segment;
 
 pub use line::LineStretch;
 pub use ray::RayStretch;
-pub use squiggle::{Line, LineSegment, Ray};
 pub use segment::LineSegmentStretch;
+pub use squiggle::{Line, LineSegment, Ray};
 
 use glam::Vec3;
 
@@ -19,7 +19,11 @@ use crate::sphere::Sphere;
 #[inline]
 pub(crate) fn rdv(dir: Vec3) -> f32 {
     let len_sq = dir.dot(dir);
-    if len_sq > f32::EPSILON { 1.0 / len_sq } else { 0.0 }
+    if len_sq > f32::EPSILON {
+        1.0 / len_sq
+    } else {
+        0.0
+    }
 }
 
 // ---------------------------------------------------------------------------

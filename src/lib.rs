@@ -17,6 +17,7 @@ pub(crate) mod point;
 pub(crate) mod sphere;
 
 pub(crate) mod convex_polytope;
+pub(crate) mod gjk;
 pub(crate) mod line;
 pub(crate) mod plane;
 pub(crate) mod pointcloud;
@@ -47,7 +48,6 @@ pub mod soa;
 pub mod bench_kernels;
 
 pub use capsule::Capsule;
-pub use shape_soa::{ShapeSoa, SoaShape};
 pub use convex_polytope::array::ArrayConvexPolytope;
 pub use convex_polytope::heap::ConvexPolytope;
 pub use cuboid::Cuboid;
@@ -60,6 +60,7 @@ pub use plane::ConvexPolygon;
 pub use plane::Plane;
 pub use point::Point;
 pub use pointcloud::Pointcloud;
+pub use shape_soa::{ShapeSoa, SoaShape};
 pub use sphere::Sphere;
 
 pub use crate::pointcloud::NoPcl;
@@ -392,7 +393,10 @@ impl<PCL: PointCloudMarker> Collider<PCL> {
                 && batch::capsules_vs_cuboids_soa(&other.capsules, &self.cuboids))
             || (s & Self::MASK_CUBOIDS != 0
                 && o & Self::MASK_CUBOIDS != 0
-                && other.cuboids.iter().any(|x| batch::cuboid_vs_cuboids_broad(&x, &self.cuboids)))
+                && other
+                    .cuboids
+                    .iter()
+                    .any(|x| batch::cuboid_vs_cuboids_broad(&x, &self.cuboids)))
             || (s & Self::MASK_CUBOIDS != 0
                 && o & Self::MASK_CYLINDERS != 0
                 && batch::cylinders_vs_cuboids_soa(&other.cylinders, &self.cuboids))
@@ -1449,7 +1453,8 @@ macro_rules! impl_capsule_query {
                         && soa::batch::capsule_vs_cylinders_broad(self, &c.cylinders))
                     || (c.mask & Collider::<$pcl>::MASK_SEGMENTS != 0 && c.segments.collides(self))
                     || (c.mask & Collider::<$pcl>::MASK_POLYGONS != 0 && c.polygons.collides(self))
-                    || (c.mask & Collider::<$pcl>::MASK_POLYTOPES != 0 && c.polytopes.collides(self))
+                    || (c.mask & Collider::<$pcl>::MASK_POLYTOPES != 0
+                        && c.polytopes.collides(self))
                     || (c.mask & Collider::<$pcl>::MASK_PLANES != 0
                         && c.planes.iter().any(|x| self.collides(x)))
                     || (c.mask & Collider::<$pcl>::MASK_LINES != 0
@@ -1482,7 +1487,8 @@ macro_rules! impl_cuboid_query {
                         && soa::batch::cuboid_vs_cylinders_broad(self, &c.cylinders))
                     || (c.mask & Collider::<$pcl>::MASK_SEGMENTS != 0 && c.segments.collides(self))
                     || (c.mask & Collider::<$pcl>::MASK_POLYGONS != 0 && c.polygons.collides(self))
-                    || (c.mask & Collider::<$pcl>::MASK_POLYTOPES != 0 && c.polytopes.collides(self))
+                    || (c.mask & Collider::<$pcl>::MASK_POLYTOPES != 0
+                        && c.polytopes.collides(self))
                     || (c.mask & Collider::<$pcl>::MASK_PLANES != 0
                         && c.planes.iter().any(|x| self.collides(x)))
                     || (c.mask & Collider::<$pcl>::MASK_LINES != 0
@@ -1515,7 +1521,8 @@ macro_rules! impl_cylinder_query {
                         && soa::batch::cylinder_vs_cuboids_broad(self, &c.cuboids))
                     || (c.mask & Collider::<$pcl>::MASK_SEGMENTS != 0 && c.segments.collides(self))
                     || (c.mask & Collider::<$pcl>::MASK_POLYGONS != 0 && c.polygons.collides(self))
-                    || (c.mask & Collider::<$pcl>::MASK_POLYTOPES != 0 && c.polytopes.collides(self))
+                    || (c.mask & Collider::<$pcl>::MASK_POLYTOPES != 0
+                        && c.polytopes.collides(self))
                     || (c.mask & Collider::<$pcl>::MASK_PLANES != 0
                         && c.planes.iter().any(|x| self.collides(x)))
                     || (c.mask & Collider::<$pcl>::MASK_LINES != 0

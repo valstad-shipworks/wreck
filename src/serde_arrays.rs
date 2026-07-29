@@ -39,9 +39,8 @@ pub(crate) mod array_as_seq {
                 while let Some(item) = seq.next_element()? {
                     vec.push(item);
                 }
-                vec.try_into().map_err(|v: Vec<T>| {
-                    serde::de::Error::invalid_length(v.len(), &self)
-                })
+                vec.try_into()
+                    .map_err(|v: Vec<T>| serde::de::Error::invalid_length(v.len(), &self))
             }
         }
 

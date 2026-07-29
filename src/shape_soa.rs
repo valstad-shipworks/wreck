@@ -197,9 +197,7 @@ impl<S: SoaShape + serde::Serialize> serde::Serialize for ShapeSoa<S> {
 #[cfg(feature = "serde")]
 impl<'de, S: SoaShape + serde::Deserialize<'de>> serde::Deserialize<'de> for ShapeSoa<S> {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(Vec::<S>::deserialize(deserializer)?
-            .into_iter()
-            .collect())
+        Ok(Vec::<S>::deserialize(deserializer)?.into_iter().collect())
     }
 }
 
@@ -295,7 +293,11 @@ mod tests {
     use super::*;
 
     fn cap(i: f32) -> Capsule {
-        Capsule::new(Vec3::new(i, i + 1.0, i + 2.0), Vec3::new(i + 3.0, i, i + 1.0), 0.5 + i * 0.1)
+        Capsule::new(
+            Vec3::new(i, i + 1.0, i + 2.0),
+            Vec3::new(i + 3.0, i, i + 1.0),
+            0.5 + i * 0.1,
+        )
     }
 
     #[test]

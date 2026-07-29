@@ -4,6 +4,7 @@ use hydroplane::{Gang, GangGlamExt, kernel};
 use crate::capsule::Capsule;
 use crate::convex_polytope::array::ArrayConvexPolytope;
 use crate::cuboid::Cuboid;
+use crate::gjk;
 use crate::point::Point;
 use crate::sphere::Sphere;
 use crate::{Collides, ConvexPolytope};
@@ -41,10 +42,22 @@ impl<'a> RefConvexPolytope<'a> {
 // Collision implementations on RefConvexPolytope
 // ---------------------------------------------------------------------------
 //
-// A convex polytope is the intersection of its half-spaces, so a shape collides
-// with it unless some plane is a separating axis. Each kernel walks the plane
-// list and returns `true` as soon as one active lane separates; a `lane < cnt`
-// mask removes the tail lanes a short final chunk leaves inactive.
+// A convex polytope is the intersection of its half-spaces, so a shape is
+// separated from it whenever some plane is a separating axis. Each kernel walks
+// the plane list and returns `true` as soon as one active lane separates; a
+// `lane < cnt` mask removes the tail lanes a short final chunk leaves inactive.
+//
+// The plane sweep alone over-reports: it never tests the other shape's face
+// normals or edge-cross axes, and it inflates the polytope's corners for shapes
+// with a radius. Its "separated" verdict is trustworthy, so it stays as the
+// fast reject; survivors are confirmed with the exact GJK narrowphase.
+
+/// Is `p` inside every half-space? A cheap collision certificate for any point
+/// known to lie inside the other shape.
+#[inline]
+pub(crate) fn point_inside(planes: &[(Vec3, f32)], p: Vec3) -> bool {
+    planes.iter().all(|&(n, d)| n.dot(p) <= d)
+}
 
 impl RefConvexPolytope<'_> {
     #[inline]
@@ -52,7 +65,16 @@ impl RefConvexPolytope<'_> {
         if BROADPHASE && !sphere.collides(self.obb) {
             return false;
         }
-        !sphere_separated_k(self.planes, sphere.center, sphere.radius)
+        if sphere_separated_k(self.planes, sphere.center, sphere.radius) {
+            return false;
+        }
+        if point_inside(self.planes, sphere.center) {
+            return true;
+        }
+        gjk::bodies_collide(
+            &gjk::ConvexBody::hull(self.vertices),
+            &gjk::ConvexBody::sphere(sphere),
+        )
     }
 
     #[inline]
@@ -60,7 +82,16 @@ impl RefConvexPolytope<'_> {
         if BROADPHASE && !cuboid.collides(self.obb) {
             return false;
         }
-        !cuboid_separated_k(self.planes, cuboid.center, cuboid.axes, cuboid.half_extents)
+        if cuboid_separated_k(self.planes, cuboid.center, cuboid.axes, cuboid.half_extents) {
+            return false;
+        }
+        if point_inside(self.planes, cuboid.center) {
+            return true;
+        }
+        gjk::bodies_collide(
+            &gjk::ConvexBody::hull(self.vertices),
+            &gjk::ConvexBody::cuboid(cuboid),
+        )
     }
 
     #[inline]
@@ -72,7 +103,16 @@ impl RefConvexPolytope<'_> {
                 return false;
             }
         }
-        !capsule_separated_k(self.planes, capsule.p1, capsule.p2(), capsule.radius)
+        if capsule_separated_k(self.planes, capsule.p1, capsule.p2(), capsule.radius) {
+            return false;
+        }
+        if point_inside(self.planes, capsule.p1) || point_inside(self.planes, capsule.p2()) {
+            return true;
+        }
+        gjk::bodies_collide(
+            &gjk::ConvexBody::hull(self.vertices),
+            &gjk::ConvexBody::capsule(capsule),
+        )
     }
 
     #[inline]
@@ -93,7 +133,19 @@ impl RefConvexPolytope<'_> {
             return false;
         }
 
-        !polytopes_separated_k(self.planes, self.vertices, other.planes, other.vertices)
+        if polytopes_separated_k(self.planes, self.vertices, other.planes, other.vertices) {
+            return false;
+        }
+        let centroid = |verts: &[Vec3]| verts.iter().copied().sum::<Vec3>() / verts.len() as f32;
+        if point_inside(self.planes, centroid(other.vertices))
+            || point_inside(other.planes, centroid(self.vertices))
+        {
+            return true;
+        }
+        gjk::bodies_collide(
+            &gjk::ConvexBody::hull(self.vertices),
+            &gjk::ConvexBody::hull(other.vertices),
+        )
     }
 }
 
@@ -162,7 +214,13 @@ fn point_separated_k<'a>(ctx: Gang, planes: &'a [(Vec3, f32)], p: Vec3) -> bool 
 }
 
 #[kernel]
-fn capsule_separated_k<'a>(ctx: Gang, planes: &'a [(Vec3, f32)], p1: Vec3, p2: Vec3, r: f32) -> bool {
+fn capsule_separated_k<'a>(
+    ctx: Gang,
+    planes: &'a [(Vec3, f32)],
+    p1: Vec3,
+    p2: Vec3,
+    r: f32,
+) -> bool {
     let zero = ctx.splat(0.0);
     let p1v = ctx.splat_vec3(p1);
     let p2v = ctx.splat_vec3(p2);

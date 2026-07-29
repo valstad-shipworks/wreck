@@ -243,10 +243,19 @@ fn clamp<A: PartialOrd>(x: A, min: A, max: A) -> A {
 /// columns `xs`/`ys`/`zs`; `true` if any squared distance is `<= rsq`. A `lane < cnt` mask
 /// drops the tail lanes a short final chunk leaves inactive.
 #[kernel]
-fn afforded3_hit<'a>(ctx: Gang, xs: &'a [f32], ys: &'a [f32], zs: &'a [f32], center: Vec3, rsq: f32) -> bool {
+fn afforded3_hit<'a>(
+    ctx: Gang,
+    xs: &'a [f32],
+    ys: &'a [f32],
+    zs: &'a [f32],
+    center: Vec3,
+    rsq: f32,
+) -> bool {
     let c = ctx.splat_vec3(center);
     let rs = ctx.splat(rsq);
-    ctx.any_n([xs, ys, zs], |[x, y, z]| (c - Vec3Wide::from([x, y, z])).length_squared().le(rs))
+    ctx.any_n([xs, ys, zs], |[x, y, z]| {
+        (c - Vec3Wide::from([x, y, z])).length_squared().le(rs)
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -906,8 +915,8 @@ mod serde_impl {
     use alloc::vec::Vec;
     use core::alloc::Layout;
     use core::cmp::max;
-    use serde::ser::{Serialize, SerializeStruct, Serializer};
     use serde::de::{Deserialize, Deserializer};
+    use serde::ser::{Serialize, SerializeStruct, Serializer};
 
     impl<A: Serialize, const K: usize> Serialize for Aabb<A, K> {
         fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -981,9 +990,10 @@ mod serde_impl {
             let afforded_arr: [ABox<[A], RuntimeAlign>; K] = {
                 let afforded_vecs = data.afforded;
                 if afforded_vecs.len() != K {
-                    return Err(serde::de::Error::custom(
-                        alloc::format!("expected {K} afforded arrays, got {}", afforded_vecs.len()),
-                    ));
+                    return Err(serde::de::Error::custom(alloc::format!(
+                        "expected {K} afforded arrays, got {}",
+                        afforded_vecs.len()
+                    )));
                 }
                 let mut iter = afforded_vecs.into_iter();
                 array::from_fn(|_| {

@@ -31,7 +31,10 @@ fn refine_bounding_opposed_spheres() {
     c.refine_bounding();
     let tight = c.broadphase().radius;
     assert!(tight <= loose, "refined {tight} should be <= loose {loose}");
-    assert!(tight < 5.5 + 0.1, "refined {tight} should be near optimal 5.5");
+    assert!(
+        tight < 5.5 + 0.1,
+        "refined {tight} should be near optimal 5.5"
+    );
 }
 
 #[test]
@@ -84,7 +87,9 @@ fn refine_bounding_encloses_all() {
         assert!(
             dist <= b.radius + 1e-5,
             "sphere at {:?} r={} not enclosed: dist={dist} > bounding={}",
-            s.center, s.radius, b.radius
+            s.center,
+            s.radius,
+            b.radius
         );
     }
 }

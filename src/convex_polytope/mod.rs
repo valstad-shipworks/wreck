@@ -2,10 +2,10 @@ pub(crate) mod array;
 pub(crate) mod heap;
 pub(crate) mod refer;
 
-use alloc::vec::Vec;
 #[cfg(not(feature = "std"))]
 #[allow(unused_imports)]
 use crate::F32Ext;
+use alloc::vec::Vec;
 
 use glam::Vec3;
 use hydroplane::{Gang, GangGlamExt, kernel};
@@ -124,7 +124,9 @@ pub(crate) fn minmax_projection_cols_k<'a>(
     let mut max_acc = neg_inf;
     for (off, cnt, active) in ctx.masked_chunks::<f32>(xs.len()) {
         let r = off..off + cnt;
-        let proj = ctx.load_partial_vec3([&xs[r.clone()], &ys[r.clone()], &zs[r]], 0.0).dot(n);
+        let proj = ctx
+            .load_partial_vec3([&xs[r.clone()], &ys[r.clone()], &zs[r]], 0.0)
+            .dot(n);
         min_acc = min_acc.min(proj.select(active, pos_inf));
         max_acc = max_acc.max(proj.select(active, neg_inf));
     }
@@ -134,7 +136,12 @@ pub(crate) fn minmax_projection_cols_k<'a>(
 /// `ds[i] = max_projection(verts, normals[i])` for every normal behind one dispatch, with the
 /// vertices staged column-wise once instead of re-gathered per normal.
 #[kernel]
-pub(crate) fn max_projections_k<'a>(ctx: Gang, verts: &'a [Vec3], normals: &'a [Vec3], ds: &'a mut [f32]) {
+pub(crate) fn max_projections_k<'a>(
+    ctx: Gang,
+    verts: &'a [Vec3],
+    normals: &'a [Vec3],
+    ds: &'a mut [f32],
+) {
     let cols = stage_cols(verts);
     let (xs, ys, zs) = cols3(&cols);
     for (n, d) in normals.iter().zip(ds.iter_mut()) {
@@ -161,7 +168,11 @@ pub(crate) fn minmax_projections_k<'a>(
 /// Min and max projections of `verts` onto all three `axes` in one pass over the vertices,
 /// so an OBB fit costs one dispatch and one memory sweep instead of six.
 #[kernel]
-fn minmax_projections3_k<'a>(ctx: Gang, verts: &'a [Vec3], axes: [Vec3; 3]) -> ([f32; 3], [f32; 3]) {
+fn minmax_projections3_k<'a>(
+    ctx: Gang,
+    verts: &'a [Vec3],
+    axes: [Vec3; 3],
+) -> ([f32; 3], [f32; 3]) {
     let n = axes.map(|a| ctx.splat_vec3(a));
     let neg_inf = ctx.splat(f32::NEG_INFINITY);
     let pos_inf = ctx.splat(f32::INFINITY);
@@ -176,8 +187,16 @@ fn minmax_projections3_k<'a>(ctx: Gang, verts: &'a [Vec3], axes: [Vec3; 3]) -> (
         }
     }
     (
-        [mins[0].reduce_min(), mins[1].reduce_min(), mins[2].reduce_min()],
-        [maxs[0].reduce_max(), maxs[1].reduce_max(), maxs[2].reduce_max()],
+        [
+            mins[0].reduce_min(),
+            mins[1].reduce_min(),
+            mins[2].reduce_min(),
+        ],
+        [
+            maxs[0].reduce_max(),
+            maxs[1].reduce_max(),
+            maxs[2].reduce_max(),
+        ],
     )
 }
 

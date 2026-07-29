@@ -128,28 +128,92 @@ fn bench(c: &mut Criterion) {
         let padded = make_cols(n, 16);
 
         g.bench_with_input(BenchmarkId::new("wide_padded", n), &n, |b, _| {
-            b.iter(|| wide_padded(black_box(&padded.x), &padded.y, &padded.z, &padded.r, black_box(Q)))
+            b.iter(|| {
+                wide_padded(
+                    black_box(&padded.x),
+                    &padded.y,
+                    &padded.z,
+                    &padded.r,
+                    black_box(Q),
+                )
+            })
         });
         g.bench_with_input(BenchmarkId::new("wide_remainder", n), &n, |b, _| {
-            b.iter(|| wide_remainder(black_box(&exact.x), &exact.y, &exact.z, &exact.r, black_box(Q)))
+            b.iter(|| {
+                wide_remainder(
+                    black_box(&exact.x),
+                    &exact.y,
+                    &exact.z,
+                    &exact.r,
+                    black_box(Q),
+                )
+            })
         });
         g.bench_with_input(BenchmarkId::new("hydro_len", n), &n, |b, _| {
-            b.iter(|| hydro_len(black_box(&exact.x), &exact.y, &exact.z, &exact.r, black_box(Q)))
+            b.iter(|| {
+                hydro_len(
+                    black_box(&exact.x),
+                    &exact.y,
+                    &exact.z,
+                    &exact.r,
+                    black_box(Q),
+                )
+            })
         });
         g.bench_with_input(BenchmarkId::new("hydro_opt", n), &n, |b, _| {
-            b.iter(|| hydro_opt(black_box(&exact.x), &exact.y, &exact.z, &exact.r, black_box(Q)))
+            b.iter(|| {
+                hydro_opt(
+                    black_box(&exact.x),
+                    &exact.y,
+                    &exact.z,
+                    &exact.r,
+                    black_box(Q),
+                )
+            })
         });
         g.bench_with_input(BenchmarkId::new("hydro_zipn", n), &n, |b, _| {
-            b.iter(|| hydro_zipn(black_box(&exact.x), &exact.y, &exact.z, &exact.r, black_box(Q)))
+            b.iter(|| {
+                hydro_zipn(
+                    black_box(&exact.x),
+                    &exact.y,
+                    &exact.z,
+                    &exact.r,
+                    black_box(Q),
+                )
+            })
         });
         g.bench_with_input(BenchmarkId::new("hydro_anyn", n), &n, |b, _| {
-            b.iter(|| hydro_anyn(black_box(&exact.x), &exact.y, &exact.z, &exact.r, black_box(Q)))
+            b.iter(|| {
+                hydro_anyn(
+                    black_box(&exact.x),
+                    &exact.y,
+                    &exact.z,
+                    &exact.r,
+                    black_box(Q),
+                )
+            })
         });
         g.bench_with_input(BenchmarkId::new("hydro_padded", n), &n, |b, _| {
-            b.iter(|| hydro_padded(black_box(&padded.x), &padded.y, &padded.z, &padded.r, black_box(Q)))
+            b.iter(|| {
+                hydro_padded(
+                    black_box(&padded.x),
+                    &padded.y,
+                    &padded.z,
+                    &padded.r,
+                    black_box(Q),
+                )
+            })
         });
         g.bench_with_input(BenchmarkId::new("scalar", n), &n, |b, _| {
-            b.iter(|| scalar_any(black_box(&exact.x), &exact.y, &exact.z, &exact.r, black_box(Q)))
+            b.iter(|| {
+                scalar_any(
+                    black_box(&exact.x),
+                    &exact.y,
+                    &exact.z,
+                    &exact.r,
+                    black_box(Q),
+                )
+            })
         });
         let q2 = [1000.0f32, 0.0, 0.01];
         g.bench_with_input(BenchmarkId::new("zipany_2col", n), &n, |b, _| {

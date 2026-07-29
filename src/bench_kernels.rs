@@ -6,7 +6,14 @@ use hydroplane::{Backend, Gang, Mask, Varying, kernel};
 
 // hydroplane: real-length, load_partial (current wreck form)
 #[kernel]
-pub fn hydro_len<'a>(ctx: Gang<f32>, xs: &'a [f32], ys: &'a [f32], zs: &'a [f32], rs: &'a [f32], q: [f32; 4]) -> bool {
+pub fn hydro_len<'a>(
+    ctx: Gang<f32>,
+    xs: &'a [f32],
+    ys: &'a [f32],
+    zs: &'a [f32],
+    rs: &'a [f32],
+    q: [f32; 4],
+) -> bool {
     let n = ctx.lanes::<f32>();
     let len = xs.len();
     let cx = ctx.splat(q[0]);
@@ -30,7 +37,14 @@ pub fn hydro_len<'a>(ctx: Gang<f32>, xs: &'a [f32], ys: &'a [f32], zs: &'a [f32]
 
 // hydroplane: full loads over padded columns (no tail staging)
 #[kernel]
-pub fn hydro_padded<'a>(ctx: Gang<f32>, xs: &'a [f32], ys: &'a [f32], zs: &'a [f32], rs: &'a [f32], q: [f32; 4]) -> bool {
+pub fn hydro_padded<'a>(
+    ctx: Gang<f32>,
+    xs: &'a [f32],
+    ys: &'a [f32],
+    zs: &'a [f32],
+    rs: &'a [f32],
+    q: [f32; 4],
+) -> bool {
     let n = ctx.lanes::<f32>();
     let cx = ctx.splat(q[0]);
     let cy = ctx.splat(q[1]);
@@ -52,7 +66,14 @@ pub fn hydro_padded<'a>(ctx: Gang<f32>, xs: &'a [f32], ys: &'a [f32], zs: &'a [f
 
 // hydroplane: full-stride loop + single masked tail (no padding, no per-iter branch)
 #[kernel]
-pub fn hydro_opt<'a>(ctx: Gang<f32>, xs: &'a [f32], ys: &'a [f32], zs: &'a [f32], rs: &'a [f32], q: [f32; 4]) -> bool {
+pub fn hydro_opt<'a>(
+    ctx: Gang<f32>,
+    xs: &'a [f32],
+    ys: &'a [f32],
+    zs: &'a [f32],
+    rs: &'a [f32],
+    q: [f32; 4],
+) -> bool {
     let n = ctx.lanes::<f32>();
     let len = xs.len();
     let cx = ctx.splat(q[0]);
@@ -102,28 +123,51 @@ fn zip_any_n<const N: usize, S: Backend<f32>>(
         }
         off += n;
     }
-    off < len && pred(core::array::from_fn(|j| ctx.load_partial(&cols[j][off..len], fills[j]))).any()
+    off < len
+        && pred(core::array::from_fn(|j| {
+            ctx.load_partial(&cols[j][off..len], fills[j])
+        }))
+        .any()
 }
 
 // 4-column broadphase expressed via the const-generic helper.
 #[kernel]
-pub fn hydro_zipn<'a>(ctx: Gang<f32>, xs: &'a [f32], ys: &'a [f32], zs: &'a [f32], rs: &'a [f32], q: [f32; 4]) -> bool {
+pub fn hydro_zipn<'a>(
+    ctx: Gang<f32>,
+    xs: &'a [f32],
+    ys: &'a [f32],
+    zs: &'a [f32],
+    rs: &'a [f32],
+    q: [f32; 4],
+) -> bool {
     let cx = ctx.splat(q[0]);
     let cy = ctx.splat(q[1]);
     let cz = ctx.splat(q[2]);
     let sr = ctx.splat(q[3]);
-    zip_any_n(ctx, [xs, ys, zs, rs], [0.0, 0.0, 0.0, f32::NAN], |[x, y, z, r]| {
-        let dx = cx - x;
-        let dy = cy - y;
-        let dz = cz - z;
-        let rsum = sr + r;
-        (dx * dx + dy * dy + dz * dz).le(rsum * rsum)
-    })
+    zip_any_n(
+        ctx,
+        [xs, ys, zs, rs],
+        [0.0, 0.0, 0.0, f32::NAN],
+        |[x, y, z, r]| {
+            let dx = cx - x;
+            let dy = cy - y;
+            let dz = cz - z;
+            let rsum = sr + r;
+            (dx * dx + dy * dy + dz * dz).le(rsum * rsum)
+        },
+    )
 }
 
 // 4-column broadphase via the shipped `ctx.any_n` (active-masked tail, no fills).
 #[kernel]
-pub fn hydro_anyn<'a>(ctx: Gang<f32>, xs: &'a [f32], ys: &'a [f32], zs: &'a [f32], rs: &'a [f32], q: [f32; 4]) -> bool {
+pub fn hydro_anyn<'a>(
+    ctx: Gang<f32>,
+    xs: &'a [f32],
+    ys: &'a [f32],
+    zs: &'a [f32],
+    rs: &'a [f32],
+    q: [f32; 4],
+) -> bool {
     let cx = ctx.splat(q[0]);
     let cy = ctx.splat(q[1]);
     let cz = ctx.splat(q[2]);
