@@ -299,7 +299,22 @@ pub(crate) fn ref_polygon_polytope_collides(
         return false;
     }
 
-    !polygon_polytope_separated_k(polygon, planes, vertices)
+    // The SAT kernel omits polygon-edge x polytope-edge cross axes, so its
+    // "not separated" verdict needs the exact confirm.
+    if polygon_polytope_separated_k(polygon, planes, vertices) {
+        return false;
+    }
+    // The stored center is only a plane reference point and may fall outside the
+    // polygon; the vertex centroid is inside it by convexity.
+    let centroid = polygon.vertices_3d.iter().copied().sum::<Vec3>()
+        / polygon.vertices_3d.len() as f32;
+    if crate::convex_polytope::refer::point_inside(planes, centroid) {
+        return true;
+    }
+    crate::gjk::bodies_collide(
+        &crate::gjk::ConvexBody::hull(polygon.vertices_3d),
+        &crate::gjk::ConvexBody::hull(vertices),
+    )
 }
 
 /// SAT for polygon-vs-polytope behind a single dispatch. Both vertex sets are staged

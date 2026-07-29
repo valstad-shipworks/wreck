@@ -17,6 +17,7 @@ pub(crate) mod point;
 pub(crate) mod sphere;
 
 pub(crate) mod convex_polytope;
+pub(crate) mod gjk;
 pub(crate) mod line;
 pub(crate) mod plane;
 pub(crate) mod pointcloud;

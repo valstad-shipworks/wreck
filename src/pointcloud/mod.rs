@@ -199,7 +199,20 @@ impl Collides<Sphere> for Pointcloud {
             Some(inv) => Vec3::from(inv.transform_point3a(glam::Vec3A::from(sphere.center))),
             None => sphere.center,
         };
-        self.tree.query_simd(&center.to_array(), sphere.radius)
+        if self.broadphase_reject_sound(sphere.radius) {
+            return self.tree.query_simd(&center.to_array(), sphere.radius);
+        }
+        // The query ball exceeds the tree's construction bound, where the CAPT can
+        // miss points in sibling leaves; scan every point instead.
+        capsule_pcl_k(
+            self.spheres.x(),
+            self.spheres.y(),
+            self.spheres.z(),
+            center,
+            Vec3::ZERO,
+            0.0,
+            sphere.radius + self.point_radius,
+        )
     }
 }
 
@@ -348,13 +361,46 @@ impl Pointcloud {
             return false;
         }
 
-        polytope_pcl_k(
+        if !polytope_pcl_k(
             self.spheres.x(),
             self.spheres.y(),
             self.spheres.z(),
             polytope.planes,
             self.point_radius,
-        )
+        ) {
+            return false;
+        }
+        if self.point_radius == 0.0 {
+            return true;
+        }
+
+        // With a point radius the plane test models the inflated polytope with
+        // sharp corners, over-reporting near edges and vertices; confirm some
+        // point's true distance. Points strictly inside all planes need no
+        // confirmation, and points beyond any plane by more than the radius
+        // cannot be within it of the polytope.
+        let xs = self.spheres.x();
+        let ys = self.spheres.y();
+        let zs = self.spheres.z();
+        for i in 0..self.point_count() {
+            let p = Vec3::new(xs[i], ys[i], zs[i]);
+            let mut max_sep = f32::NEG_INFINITY;
+            for &(n, d) in polytope.planes {
+                max_sep = max_sep.max(n.dot(p) - d);
+            }
+            if max_sep <= 0.0 {
+                return true;
+            }
+            if max_sep <= self.point_radius
+                && crate::gjk::bodies_collide(
+                    &crate::gjk::ConvexBody::point_with_margin(p, self.point_radius),
+                    &crate::gjk::ConvexBody::hull(polytope.vertices),
+                )
+            {
+                return true;
+            }
+        }
+        false
     }
 }
 
@@ -541,13 +587,22 @@ impl Collides<Pointcloud> for Pointcloud {
             return false;
         }
 
-        let (iter_cloud, tree_cloud) = if self.point_count() <= other.point_count() {
+        let combined_radius = self.point_radius + other.point_radius;
+
+        let (mut iter_cloud, mut tree_cloud) = if self.point_count() <= other.point_count() {
             (self, other)
         } else {
             (other, self)
         };
-
-        let combined_radius = iter_cloud.point_radius + tree_cloud.point_radius;
+        // The CAPT only answers soundly while the query ball stays within its
+        // construction bound; prefer whichever orientation satisfies that, and
+        // fall back to a full SIMD point scan when neither does.
+        if !tree_cloud.broadphase_reject_sound(combined_radius)
+            && iter_cloud.broadphase_reject_sound(combined_radius)
+        {
+            core::mem::swap(&mut iter_cloud, &mut tree_cloud);
+        }
+        let tree_sound = tree_cloud.broadphase_reject_sound(combined_radius);
 
         let transform = match (&iter_cloud.inverse_transform, &tree_cloud.inverse_transform) {
             (None, None) => None,
@@ -561,24 +616,29 @@ impl Collides<Pointcloud> for Pointcloud {
         let szs = iter_cloud.spheres.z();
         let n = iter_cloud.point_count();
 
-        if let Some(mat) = &transform {
-            for i in 0..n {
-                let tp = mat.transform_point3a(glam::Vec3A::new(sxs[i], sys[i], szs[i]));
-                if tree_cloud
-                    .tree
-                    .query_simd(&[tp.x, tp.y, tp.z], combined_radius)
-                {
-                    return true;
+        for i in 0..n {
+            let p = match &transform {
+                Some(mat) => {
+                    let tp = mat.transform_point3a(glam::Vec3A::new(sxs[i], sys[i], szs[i]));
+                    Vec3::new(tp.x, tp.y, tp.z)
                 }
-            }
-        } else {
-            for i in 0..n {
-                if tree_cloud
-                    .tree
-                    .query_simd(&[sxs[i], sys[i], szs[i]], combined_radius)
-                {
-                    return true;
-                }
+                None => Vec3::new(sxs[i], sys[i], szs[i]),
+            };
+            let hit = if tree_sound {
+                tree_cloud.tree.query_simd(&p.to_array(), combined_radius)
+            } else {
+                capsule_pcl_k(
+                    tree_cloud.spheres.x(),
+                    tree_cloud.spheres.y(),
+                    tree_cloud.spheres.z(),
+                    p,
+                    Vec3::ZERO,
+                    0.0,
+                    combined_radius,
+                )
+            };
+            if hit {
+                return true;
             }
         }
 
