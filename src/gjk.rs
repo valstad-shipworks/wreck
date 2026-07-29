@@ -266,7 +266,11 @@ fn closest_on_simplex(pts: &mut [Vec3; 4], len: usize) -> (Vec3, usize) {
         }
     }
 
-    let feature = [pts[best_idx[0]], pts[best_idx[1.min(best_len - 1)]], pts[best_idx[2.min(best_len - 1)]]];
+    let feature = [
+        pts[best_idx[0]],
+        pts[best_idx[1.min(best_len - 1)]],
+        pts[best_idx[2.min(best_len - 1)]],
+    ];
     pts[..best_len].copy_from_slice(&feature[..best_len]);
     (best_p, best_len)
 }

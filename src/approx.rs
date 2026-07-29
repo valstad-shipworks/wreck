@@ -8,7 +8,7 @@ use crate::cuboid::Cuboid;
 use crate::cylinder::Cylinder;
 use crate::plane::{ConvexPolygon, Plane};
 use crate::point::Point;
-use crate::pointcloud::{NoPcl, Pointcloud, PointCloudMarker};
+use crate::pointcloud::{NoPcl, PointCloudMarker, Pointcloud};
 use crate::shape_soa::SoaShape;
 use crate::soa::{BroadCollection, ShapeCollection, SpheresSoA};
 use crate::sphere::Sphere;
@@ -394,10 +394,14 @@ impl RelativeEq for Pointcloud {
         epsilon: Self::Epsilon,
         max_relative: Self::Epsilon,
     ) -> bool {
-        f32::relative_eq(&self.point_radius, &other.point_radius, epsilon, max_relative)
-            && self
-                .spheres
-                .relative_eq(&other.spheres, epsilon, max_relative)
+        f32::relative_eq(
+            &self.point_radius,
+            &other.point_radius,
+            epsilon,
+            max_relative,
+        ) && self
+            .spheres
+            .relative_eq(&other.spheres, epsilon, max_relative)
     }
 }
 
@@ -455,12 +459,15 @@ fn soa_abs_diff_eq_k<'a>(
     eps: f32,
 ) -> bool {
     let e = ctx.splat(eps);
-    ctx.all_n([ax, bx, ay, by, az, bz, ar, br], |[ax, bx, ay, by, az, bz, ar, br]| {
-        (ax - bx).abs().le(e)
-            & (ay - by).abs().le(e)
-            & (az - bz).abs().le(e)
-            & (ar - br).abs().le(e)
-    })
+    ctx.all_n(
+        [ax, bx, ay, by, az, bz, ar, br],
+        |[ax, bx, ay, by, az, bz, ar, br]| {
+            (ax - bx).abs().le(e)
+                & (ay - by).abs().le(e)
+                & (az - bz).abs().le(e)
+                & (ar - br).abs().le(e)
+        },
+    )
 }
 
 impl RelativeEq for SpheresSoA {
@@ -510,13 +517,16 @@ fn soa_relative_eq_k<'a>(
     max_rel: f32,
 ) -> bool {
     let e = ctx.splat(eps);
-    ctx.all_n([ax, bx, ay, by, az, bz, ar, br], |[ax, bx, ay, by, az, bz, ar, br]| {
-        let mx = (ax - bx).abs().le(e.max(ax.abs().max(bx.abs()) * max_rel));
-        let my = (ay - by).abs().le(e.max(ay.abs().max(by.abs()) * max_rel));
-        let mz = (az - bz).abs().le(e.max(az.abs().max(bz.abs()) * max_rel));
-        let mr = (ar - br).abs().le(e.max(ar.abs().max(br.abs()) * max_rel));
-        mx & my & mz & mr
-    })
+    ctx.all_n(
+        [ax, bx, ay, by, az, bz, ar, br],
+        |[ax, bx, ay, by, az, bz, ar, br]| {
+            let mx = (ax - bx).abs().le(e.max(ax.abs().max(bx.abs()) * max_rel));
+            let my = (ay - by).abs().le(e.max(ay.abs().max(by.abs()) * max_rel));
+            let mz = (az - bz).abs().le(e.max(az.abs().max(bz.abs()) * max_rel));
+            let mr = (ar - br).abs().le(e.max(ar.abs().max(br.abs()) * max_rel));
+            mx & my & mz & mr
+        },
+    )
 }
 
 impl<T> AbsDiffEq for BroadCollection<T>
@@ -575,7 +585,12 @@ where
         f32::default_max_relative()
     }
 
-    fn relative_eq(&self, other: &Self, epsilon: Self::Epsilon, max_relative: Self::Epsilon) -> bool {
+    fn relative_eq(
+        &self,
+        other: &Self,
+        epsilon: Self::Epsilon,
+        max_relative: Self::Epsilon,
+    ) -> bool {
         self.broad.relative_eq(&other.broad, epsilon, max_relative)
     }
 }

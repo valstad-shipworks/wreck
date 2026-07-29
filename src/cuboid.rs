@@ -1,8 +1,8 @@
-use alloc::vec::Vec;
-use core::fmt;
 #[cfg(not(feature = "std"))]
 #[allow(unused_imports)]
 use crate::F32Ext;
+use alloc::vec::Vec;
+use core::fmt;
 
 use glam::{DMat3, DVec3, Vec3};
 use hydroplane::{Gang, GangGlamExt, kernel};
@@ -442,7 +442,11 @@ fn capsule_cuboid_collides<const BROADPHASE: bool>(capsule: &Capsule, cuboid: &C
     for i in 0..3 {
         for j in (i + 1)..3 {
             let denom = dir[i] * dir[i] + dir[j] * dir[j];
-            let inv = if denom > f32::EPSILON { 1.0 / denom } else { 0.0 };
+            let inv = if denom > f32::EPSILON {
+                1.0 / denom
+            } else {
+                0.0
+            };
             for si in [-1.0f32, 1.0] {
                 for sj in [-1.0f32, 1.0] {
                     let num = dir[i] * (si * he[i] - p0[i]) + dir[j] * (sj * he[j] - p0[j]);
@@ -453,7 +457,11 @@ fn capsule_cuboid_collides<const BROADPHASE: bool>(capsule: &Capsule, cuboid: &C
         }
     }
     let denom = dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2];
-    let inv = if denom > f32::EPSILON { 1.0 / denom } else { 0.0 };
+    let inv = if denom > f32::EPSILON {
+        1.0 / denom
+    } else {
+        0.0
+    };
     for s0 in [-1.0f32, 1.0] {
         for s1 in [-1.0f32, 1.0] {
             for s2 in [-1.0f32, 1.0] {
@@ -475,7 +483,14 @@ fn capsule_cuboid_collides<const BROADPHASE: bool>(capsule: &Capsule, cuboid: &C
 /// candidate set covers every piecewise minimum, so a miss here is exact. An
 /// explicit `lane < cnt` mask drops the inactive tail lanes a wider backend may add.
 #[kernel]
-pub(crate) fn capsule_cuboid_eval_exact(ctx: Gang, ts: [f32; 28], p0: Vec3, dir: Vec3, he: Vec3, rs_sq: f32) -> bool {
+pub(crate) fn capsule_cuboid_eval_exact(
+    ctx: Gang,
+    ts: [f32; 28],
+    p0: Vec3,
+    dir: Vec3,
+    he: Vec3,
+    rs_sq: f32,
+) -> bool {
     let rs = ctx.splat(rs_sq);
     let zero = ctx.splat(0.0);
     let p0v = ctx.splat_vec3(p0);
@@ -501,7 +516,14 @@ pub(crate) fn capsule_cuboid_eval_exact(ctx: Gang, ts: [f32; 28], p0: Vec3, dir:
 /// candidate set, so the result is exact. An explicit `lane < cnt` mask drops the
 /// inactive tail lanes a wider backend may add.
 #[kernel]
-pub(crate) fn capsule_cuboid_eval(ctx: Gang, ts: [f32; 8], p0: Vec3, dir: Vec3, he: Vec3, rs_sq: f32) -> bool {
+pub(crate) fn capsule_cuboid_eval(
+    ctx: Gang,
+    ts: [f32; 8],
+    p0: Vec3,
+    dir: Vec3,
+    he: Vec3,
+    rs_sq: f32,
+) -> bool {
     let rs = ctx.splat(rs_sq);
     let zero = ctx.splat(0.0);
     let p0v = ctx.splat_vec3(p0);

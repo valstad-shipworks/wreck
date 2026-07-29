@@ -1,6 +1,6 @@
 [package]
 name = "wreck"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["Bowan Foryt <bowan@valstad.com>"]
@@ -31,7 +31,7 @@ serde = { version = "1", default-features = false, features = ["derive", "alloc"
 quote = { version = "1", optional = true }
 proc-macro2 = { version = "1", optional = true }
 libm = { version = "0.2", optional = true }
-inherent = "1.0.13"
+inherent = "1.0.14"
 aligned-vec = { version = "0.6.4", default-features = false }
 static_assertions = "1.1.0"
 valuable = { version = "0.1", default-features = false, features = ["alloc"], optional = true }

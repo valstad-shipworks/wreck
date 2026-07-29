@@ -2,19 +2,22 @@
 //! `valuable::Valuable` impls for the public shape types. Glam fields are
 //! bridged through `glam_traits_ext::GlamValuable`.
 
-use glam::Vec3;
-use glam_traits_ext::GlamValuable;
 use ::valuable::{
     EnumDef, Enumerable, Fields, Listable, NamedField, NamedValues, StructDef, Structable,
     Valuable, Value, Variant, VariantDef, Visit,
 };
+use glam::Vec3;
+use glam_traits_ext::GlamValuable;
 
 use crate::{
     ArrayConvexPolygon, ArrayConvexPolytope, Capsule, ConvexPolygon, ConvexPolytope, Cuboid,
     Cylinder, NoPcl, Plane, Point, Sphere,
-    capsule::CapsuleStretch, cuboid::CuboidStretch, cylinder::CylinderStretch,
+    capsule::CapsuleStretch,
+    cuboid::CuboidStretch,
+    cylinder::CylinderStretch,
     line::{LineSegmentStretch, LineStretch, RayStretch},
-    plane::ConvexPolygonStretch, sphere::SphereStretch,
+    plane::ConvexPolygonStretch,
+    sphere::SphereStretch,
 };
 
 // ---------------------------------------------------------------------------
@@ -108,16 +111,30 @@ macro_rules! field_binding {
     ($self:ident, $field:ident, planes_vec) => {
         let $field = PlanesSlice($self.$field.as_slice());
     };
-    ($self:ident, $field:ident, glam) => { /* none */ };
-    ($self:ident, $field:ident, plain) => { /* none */ };
+    ($self:ident, $field:ident, glam) => {
+        /* none */
+    };
+    ($self:ident, $field:ident, plain) => {
+        /* none */
+    };
 }
 
 macro_rules! field_value {
-    ($self:ident, $field:ident, glam) => { GlamValuable::as_value(&$self.$field) };
-    ($self:ident, $field:ident, glam_array) => { $field.as_value() };
-    ($self:ident, $field:ident, glam_vec) => { $field.as_value() };
-    ($self:ident, $field:ident, planes_vec) => { $field.as_value() };
-    ($self:ident, $field:ident, plain) => { Valuable::as_value(&$self.$field) };
+    ($self:ident, $field:ident, glam) => {
+        GlamValuable::as_value(&$self.$field)
+    };
+    ($self:ident, $field:ident, glam_array) => {
+        $field.as_value()
+    };
+    ($self:ident, $field:ident, glam_vec) => {
+        $field.as_value()
+    };
+    ($self:ident, $field:ident, planes_vec) => {
+        $field.as_value()
+    };
+    ($self:ident, $field:ident, plain) => {
+        Valuable::as_value(&$self.$field)
+    };
 }
 
 macro_rules! impl_struct {
@@ -152,7 +169,10 @@ macro_rules! impl_struct {
     };
 }
 
-impl_struct!(Sphere { center: glam, radius: plain });
+impl_struct!(Sphere {
+    center: glam,
+    radius: plain
+});
 impl_struct!(Capsule {
     p1: glam,
     dir: glam,
@@ -173,7 +193,10 @@ impl_struct!(Cuboid {
     half_extents: plain,
     axis_aligned: plain,
 });
-impl_struct!(Plane { normal: glam, d: plain });
+impl_struct!(Plane {
+    normal: glam,
+    d: plain
+});
 impl_struct!(ConvexPolygon {
     center: glam,
     normal: glam,

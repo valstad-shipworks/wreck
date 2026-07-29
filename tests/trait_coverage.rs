@@ -3,7 +3,7 @@
 //! dropped, this test fails to compile.
 
 use wreck::{
-    ArrayConvexPolytope, Bounded, Capsule, Collides, ColliderComponent, ConvexPolygon,
+    ArrayConvexPolytope, Bounded, Capsule, ColliderComponent, Collides, ConvexPolygon,
     ConvexPolytope, Cuboid, Cylinder, Line, LineSegment, Plane, Point, Pointcloud, Ray, Scalable,
     Sphere, Stretchable, Transformable,
 };

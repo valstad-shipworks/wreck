@@ -71,7 +71,10 @@ impl RefConvexPolytope<'_> {
         if point_inside(self.planes, sphere.center) {
             return true;
         }
-        gjk::bodies_collide(&gjk::ConvexBody::hull(self.vertices), &gjk::ConvexBody::sphere(sphere))
+        gjk::bodies_collide(
+            &gjk::ConvexBody::hull(self.vertices),
+            &gjk::ConvexBody::sphere(sphere),
+        )
     }
 
     #[inline]
@@ -85,7 +88,10 @@ impl RefConvexPolytope<'_> {
         if point_inside(self.planes, cuboid.center) {
             return true;
         }
-        gjk::bodies_collide(&gjk::ConvexBody::hull(self.vertices), &gjk::ConvexBody::cuboid(cuboid))
+        gjk::bodies_collide(
+            &gjk::ConvexBody::hull(self.vertices),
+            &gjk::ConvexBody::cuboid(cuboid),
+        )
     }
 
     #[inline]
@@ -103,7 +109,10 @@ impl RefConvexPolytope<'_> {
         if point_inside(self.planes, capsule.p1) || point_inside(self.planes, capsule.p2()) {
             return true;
         }
-        gjk::bodies_collide(&gjk::ConvexBody::hull(self.vertices), &gjk::ConvexBody::capsule(capsule))
+        gjk::bodies_collide(
+            &gjk::ConvexBody::hull(self.vertices),
+            &gjk::ConvexBody::capsule(capsule),
+        )
     }
 
     #[inline]
@@ -205,7 +214,13 @@ fn point_separated_k<'a>(ctx: Gang, planes: &'a [(Vec3, f32)], p: Vec3) -> bool 
 }
 
 #[kernel]
-fn capsule_separated_k<'a>(ctx: Gang, planes: &'a [(Vec3, f32)], p1: Vec3, p2: Vec3, r: f32) -> bool {
+fn capsule_separated_k<'a>(
+    ctx: Gang,
+    planes: &'a [(Vec3, f32)],
+    p1: Vec3,
+    p2: Vec3,
+    r: f32,
+) -> bool {
     let zero = ctx.splat(0.0);
     let p1v = ctx.splat_vec3(p1);
     let p2v = ctx.splat_vec3(p2);

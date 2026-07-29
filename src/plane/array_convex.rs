@@ -1,7 +1,7 @@
-use core::fmt;
 #[cfg(not(feature = "std"))]
 #[allow(unused_imports)]
 use crate::F32Ext;
+use core::fmt;
 
 use glam::Vec3;
 

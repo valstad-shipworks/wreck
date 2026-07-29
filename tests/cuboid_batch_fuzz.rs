@@ -2,8 +2,8 @@
 //! against a cuboid-only collider) against the scalar 15-axis SAT reference.
 
 use glam::{Quat, Vec3};
-use std::f32::consts::PI;
 use rand::{Rng, SeedableRng, rngs::SmallRng};
+use std::f32::consts::PI;
 use wreck::{Collider, Collides, Cuboid};
 
 fn rand_cuboid(rng: &mut SmallRng, axis_aligned_chance: f64) -> Cuboid {

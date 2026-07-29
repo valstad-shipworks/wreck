@@ -306,8 +306,8 @@ pub(crate) fn ref_polygon_polytope_collides(
     }
     // The stored center is only a plane reference point and may fall outside the
     // polygon; the vertex centroid is inside it by convexity.
-    let centroid = polygon.vertices_3d.iter().copied().sum::<Vec3>()
-        / polygon.vertices_3d.len() as f32;
+    let centroid =
+        polygon.vertices_3d.iter().copied().sum::<Vec3>() / polygon.vertices_3d.len() as f32;
     if crate::convex_polytope::refer::point_inside(planes, centroid) {
         return true;
     }

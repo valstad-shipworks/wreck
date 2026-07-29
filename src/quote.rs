@@ -3,11 +3,11 @@ use proc_macro2::TokenStream;
 use quote::quote;
 
 use crate::capsule::Capsule;
+use crate::convex_polytope::array::ArrayConvexPolytope;
 use crate::cuboid::Cuboid;
 use crate::cylinder::Cylinder;
 use crate::plane::Plane;
 use crate::plane::array_convex::ArrayConvexPolygon;
-use crate::convex_polytope::array::ArrayConvexPolytope;
 use crate::sphere::Sphere;
 
 fn vec3_tokens(v: glam::Vec3) -> TokenStream {
@@ -76,11 +76,15 @@ impl<const V: usize> From<ArrayConvexPolygon<V>> for TokenStream {
         let normal = vec3_tokens(p.normal);
         let u_axis = vec3_tokens(p.u_axis);
         let v_axis = vec3_tokens(p.v_axis);
-        let verts: Vec<TokenStream> = p.vertices_2d.iter().map(|v| {
-            let a = v[0];
-            let b = v[1];
-            quote! { [#a, #b] }
-        }).collect();
+        let verts: Vec<TokenStream> = p
+            .vertices_2d
+            .iter()
+            .map(|v| {
+                let a = v[0];
+                let b = v[1];
+                quote! { [#a, #b] }
+            })
+            .collect();
         quote! {
             wreck::ArrayConvexPolygon::<#V>::new(
                 #center,
@@ -95,10 +99,14 @@ impl<const V: usize> From<ArrayConvexPolygon<V>> for TokenStream {
 
 impl<const P: usize, const V: usize> From<ArrayConvexPolytope<P, V>> for TokenStream {
     fn from(p: ArrayConvexPolytope<P, V>) -> TokenStream {
-        let planes: Vec<TokenStream> = p.planes.iter().map(|(n, d)| {
-            let nt = vec3_tokens(*n);
-            quote! { (#nt, #d) }
-        }).collect();
+        let planes: Vec<TokenStream> = p
+            .planes
+            .iter()
+            .map(|(n, d)| {
+                let nt = vec3_tokens(*n);
+                quote! { (#nt, #d) }
+            })
+            .collect();
         let vertices: Vec<TokenStream> = p.vertices.iter().map(|v| vec3_tokens(*v)).collect();
         let obb: TokenStream = p.obb.into();
         quote! {

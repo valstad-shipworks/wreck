@@ -1,8 +1,8 @@
-use alloc::vec::Vec;
-use core::fmt;
 #[cfg(not(feature = "std"))]
 #[allow(unused_imports)]
 use crate::F32Ext;
+use alloc::vec::Vec;
+use core::fmt;
 
 use glam::{DMat3, DVec3, Vec3};
 use hydroplane::{Gang, GangGlamExt, kernel};
@@ -364,7 +364,17 @@ fn cylinder_capsule_collides<const BROADPHASE: bool>(cyl: &Cylinder, capsule: &C
     // Each sample is an exact point-to-solid-cylinder test, so a hit is definitive;
     // a miss can still hide an interior minimum between samples and needs the exact
     // narrowphase.
-    if cylinder_capsule_eval(samples, capsule.p1, capsule.dir, cyl.p1, cyl.dir, cyl.rdv, cyl.radius, capsule.radius, e) {
+    if cylinder_capsule_eval(
+        samples,
+        capsule.p1,
+        capsule.dir,
+        cyl.p1,
+        cyl.dir,
+        cyl.rdv,
+        cyl.radius,
+        capsule.radius,
+        e,
+    ) {
         return true;
     }
 
@@ -539,7 +549,8 @@ fn cylinder_cuboid_collides<const BROADPHASE: bool>(cyl: &Cylinder, cuboid: &Cub
     // Axis-penetration accept: with radius zero the sample set is complete (a
     // penetrating axis touches the box at one of the entry-face crossings), so
     // a zero-distance sample proves the cylinder's spine enters the box.
-    if crate::cuboid::capsule_cuboid_eval(ts, Vec3::from(p0), Vec3::from(dir), Vec3::from(he), 0.0) {
+    if crate::cuboid::capsule_cuboid_eval(ts, Vec3::from(p0), Vec3::from(dir), Vec3::from(he), 0.0)
+    {
         return true;
     }
 
@@ -592,7 +603,14 @@ fn cylinder_corners_eval(
     let dv = ctx.splat_vec3(cyl_dir);
 
     for (off, cnt, active) in ctx.masked_chunks::<f32>(8) {
-        let w = ctx.load_partial_vec3([&cx[off..off + cnt], &cy[off..off + cnt], &cz[off..off + cnt]], 0.0) - p1v;
+        let w = ctx.load_partial_vec3(
+            [
+                &cx[off..off + cnt],
+                &cy[off..off + cnt],
+                &cz[off..off + cnt],
+            ],
+            0.0,
+        ) - p1v;
 
         let t = w.dot(dv) * rdv;
         let in_slab = zero.le(t) & t.le(one);

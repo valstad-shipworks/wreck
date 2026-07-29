@@ -37,7 +37,10 @@ fn cylinder_vs_cylinder_collection_matches_scalar() {
         let q = rand_cylinder(&mut rng, 0.08);
         let want = cyls.iter().any(|c| q.collides(c));
         let got = col.collides(&q);
-        assert_eq!(got, want, "iter {iter}: mismatch over {count} cylinders, q={q:?}");
+        assert_eq!(
+            got, want,
+            "iter {iter}: mismatch over {count} cylinders, q={q:?}"
+        );
         if want {
             hits += 1;
         }
