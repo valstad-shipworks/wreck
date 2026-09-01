@@ -17,6 +17,9 @@
 //! themselves, so the answer there is inherently ambiguous. The band is biased
 //! toward reporting contact, so a genuine touch is never missed.
 
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use crate::F32Ext;
 use glam::Vec3;
 
 use crate::capsule::Capsule;

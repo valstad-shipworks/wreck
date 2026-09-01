@@ -22,7 +22,7 @@ valuable = ["dep:valuable", "glam-traits-ext/Valuable", "squiggle/valuable"]
 # register it so the crate-root `register_tool` and macro-emitted tool attribute don't trip
 # the unexpected-cfg lint.
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(hp_analyze)'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(hp_analyze)', 'cfg(has_quad_load)'] }
 
 [dependencies]
 glam = { version = "0.32.1", default-features = false }
@@ -57,4 +57,8 @@ harness = false
 
 [[bench]]
 name = "wide_vs_hydroplane"
+harness = false
+
+[[bench]]
+name = "raycast"
 harness = false

@@ -21,6 +21,7 @@ pub(crate) mod gjk;
 pub(crate) mod line;
 pub(crate) mod plane;
 pub(crate) mod pointcloud;
+pub(crate) mod raycast;
 pub(crate) mod shape_soa;
 
 mod util;
@@ -60,6 +61,7 @@ pub use plane::ConvexPolygon;
 pub use plane::Plane;
 pub use point::Point;
 pub use pointcloud::Pointcloud;
+pub use raycast::{Hit, Raycast};
 pub use shape_soa::{ShapeSoa, SoaShape};
 pub use sphere::Sphere;
 
@@ -953,23 +955,29 @@ impl<PCL: PointCloudMarker> Collider<PCL> {
 
     /// Expand the cached bounding sphere to enclose `other`.
     fn expand_bounding(&mut self, other: &Sphere) {
-        if self.bounding.radius == 0.0 && self.bounding.center == glam::Vec3::ZERO {
-            // First shape — just adopt its bounding sphere.
+        // `add_to_shapes` calls this before setting the type's mask bit, so a clear mask means
+        // there is nothing yet to enclose.
+        if self.mask == 0 {
             self.bounding = *other;
             return;
         }
         let d = other.center - self.bounding.center;
         let dist = d.length();
-        let needed = dist + other.radius;
-        if needed > self.bounding.radius {
-            // New sphere that encloses both.
-            let new_radius = (self.bounding.radius + needed) * 0.5;
-            let shift = new_radius - self.bounding.radius;
-            if dist > f32::EPSILON {
-                self.bounding.center += d * (shift / dist);
-            }
-            self.bounding.radius = new_radius;
+        if dist + other.radius <= self.bounding.radius {
+            return;
         }
+        // The midpoint construction below only encloses both spheres when neither already
+        // contains the other; when `other` swallows the accumulated sphere it lands short.
+        if dist + self.bounding.radius <= other.radius {
+            self.bounding = *other;
+            return;
+        }
+        let new_radius = (self.bounding.radius + dist + other.radius) * 0.5;
+        let shift = new_radius - self.bounding.radius;
+        if dist > f32::EPSILON {
+            self.bounding.center += d * (shift / dist);
+        }
+        self.bounding.radius = new_radius;
     }
 
     /// Recompute bounding sphere from scratch (e.g. after stretch).
@@ -995,15 +1003,20 @@ impl<PCL: PointCloudMarker> Collider<PCL> {
                     }
                     let d = bp.center - center;
                     let dist = d.length();
-                    let needed = dist + bp.radius;
-                    if needed > radius {
-                        let new_radius = (radius + needed) * 0.5;
-                        let shift = new_radius - radius;
-                        if dist > f32::EPSILON {
-                            center += d * (shift / dist);
-                        }
-                        radius = new_radius;
+                    if dist + bp.radius <= radius {
+                        continue;
                     }
+                    if dist + radius <= bp.radius {
+                        center = bp.center;
+                        radius = bp.radius;
+                        continue;
+                    }
+                    let new_radius = (radius + dist + bp.radius) * 0.5;
+                    let shift = new_radius - radius;
+                    if dist > f32::EPSILON {
+                        center += d * (shift / dist);
+                    }
+                    radius = new_radius;
                 }
             };
         }

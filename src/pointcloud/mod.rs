@@ -679,12 +679,58 @@ impl Collides<Pointcloud> for Pointcloud {
 pub trait PointCloudMarker:
     __private::Sealed + Sized + Clone + Debug + Transformable + Scalable + Bounded
 {
+    /// Smallest `t` in `[t_min, t_max]` at which `origin + dir * t` is within `point_radius`
+    /// of some cloud point. Backs [`Raycast`](crate::Raycast) for colliders holding a cloud.
+    #[doc(hidden)]
+    fn nearest_entry(&self, origin: Vec3, dir: Vec3, t_min: f32, t_max: f32) -> Option<f32>;
 }
 
 impl __private::Sealed for Pointcloud {}
-impl PointCloudMarker for Pointcloud {}
+impl PointCloudMarker for Pointcloud {
+    fn nearest_entry(&self, origin: Vec3, dir: Vec3, t_min: f32, t_max: f32) -> Option<f32> {
+        if self.point_count() == 0 {
+            return None;
+        }
+        let (o, d) = match &self.inverse_transform {
+            Some(inv) => (
+                Vec3::from(inv.transform_point3a(glam::Vec3A::from(origin))),
+                Vec3::from(inv.matrix3 * glam::Vec3A::from(dir)),
+            ),
+            None => (origin, dir),
+        };
+
+        let dd = d.dot(d);
+        if dd <= f32::EPSILON {
+            // Degenerate direction: every `t` names the same point.
+            let r_sq = self.point_radius * self.point_radius;
+            let inside = self
+                .spheres
+                .iter()
+                .any(|s| (o - s.center).length_squared() <= r_sq);
+            return inside.then(|| 0.0f32.clamp(t_min, t_max));
+        }
+
+        let t = pcl_entry_k(
+            self.spheres.x(),
+            self.spheres.y(),
+            self.spheres.z(),
+            o,
+            d,
+            1.0 / dd,
+            self.point_radius,
+            t_min,
+            t_max,
+        );
+        t.is_finite().then_some(t)
+    }
+}
 impl __private::Sealed for NoPcl {}
-impl PointCloudMarker for NoPcl {}
+impl PointCloudMarker for NoPcl {
+    #[inline]
+    fn nearest_entry(&self, _origin: Vec3, _dir: Vec3, _t_min: f32, _t_max: f32) -> Option<f32> {
+        None
+    }
+}
 
 #[doc(hidden)]
 mod __private {
@@ -865,6 +911,48 @@ fn line_pcl_k<'a>(
         let t = ((p - o).dot(d) * rdv).max(lo).min(hi);
         (p - o.add_scaled(d, t)).length_squared().le(r_sq)
     })
+}
+
+/// Line/Ray/Segment nearest-entry: smallest `t` in `[t_min, t_max]` at which the line crosses
+/// into some point's ball, or `INFINITY` if it never does. `inv_dd` is `1 / dir·dir`, which the
+/// caller has already established is finite. Inactive tail lanes load as the origin, so they are
+/// masked out rather than trusted.
+#[kernel]
+#[allow(clippy::too_many_arguments)]
+fn pcl_entry_k<'a>(
+    ctx: Gang,
+    xs: &'a [f32],
+    ys: &'a [f32],
+    zs: &'a [f32],
+    origin: Vec3,
+    dir: Vec3,
+    inv_dd: f32,
+    r: f32,
+    t_min: f32,
+    t_max: f32,
+) -> f32 {
+    let o = ctx.splat_vec3(origin);
+    let d = ctx.splat_vec3(dir);
+    let inv = ctx.splat(inv_dd);
+    let r_sq = ctx.splat(r * r);
+    let lo = ctx.splat(t_min);
+    let hi = ctx.splat(t_max);
+    let zero = ctx.splat(0.0);
+    let pos_inf = ctx.splat(f32::INFINITY);
+
+    let mut acc = pos_inf;
+    for (off, cnt, active) in ctx.masked_chunks::<f32>(xs.len()) {
+        let range = off..off + cnt;
+        let p = ctx.load_partial_vec3([&xs[range.clone()], &ys[range.clone()], &zs[range]], 0.0);
+        let t_mid = (p - o).dot(d) * inv;
+        let gap = r_sq - (p - o.add_scaled(d, t_mid)).length_squared();
+        let half = (gap.max(zero) * inv).sqrt();
+        let entry = (t_mid - half).max(lo);
+        let exit = (t_mid + half).min(hi);
+        let keep = entry.select(gap.ge(zero), pos_inf);
+        acc = acc.min(keep.select(entry.le(exit), pos_inf).select(active, pos_inf));
+    }
+    acc.reduce_min()
 }
 
 /// Convex-polygon narrowphase: is any cloud point within `r` (squared `r_sq`) of the flat polygon?
