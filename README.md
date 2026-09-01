@@ -5,6 +5,7 @@ A 3D collision detection library for Rust. Built on top of `glam` for math and [
 ## Traits
 
 - `Collides<T>` - boolean collision test between two shapes. Every pair of built-in shapes has an implementation in both directions.
+- `Raycast<T>` - where a `Line`, `Ray` or `LineSegment` first meets a shape, as a point and a parameter along the line. Implemented for every volume, `Plane`, `ConvexPolygon`, `Pointcloud` and `Collider`, in both directions.
 - `Scalable` - uniform scaling of a shape.
 - `Transformable` - translate, rotate (via `Mat3` or `Quat`), or apply a full `Affine3` transform.
 - `Stretchable` - sweep a shape along a translation vector, producing the convex hull of the motion.
@@ -143,6 +144,37 @@ capsule.collides(&sphere);
 let others: Vec<Sphere> = vec![/* ... */];
 sphere.collides_many(&others);
 ```
+
+### Raycasting
+
+`Raycast` finds where a `Line`, `Ray` or `LineSegment` first meets a shape.
+
+```rust
+use wreck::Raycast;
+
+let ray = Ray::new(Vec3::ZERO, Vec3::X);
+
+if let Some(hit) = ray.raycast(&sphere) {
+    hit.point; // Vec3 — the intersection point
+    hit.t;     // parameter along the ray: origin + dir * t
+}
+
+// works in both directions, and against a whole Collider (nearest shape wins)
+let same = sphere.raycast(&ray);
+let nearest = ray.raycast(&collider);
+```
+
+`t` is in the line's own parameter space — `origin + dir * t` for `Line` and `Ray`,
+`start + (end - start) * t` for `LineSegment`. Directions are not normalized, so `t` is a
+distance only when the direction happens to be unit length.
+
+The hit is the *first* point of the line that is inside the shape, searching forward over that
+line type's domain: all of `(-∞, ∞)` for `Line`, `[0, ∞)` for `Ray`, `[0, 1]` for `LineSegment`.
+So `raycast` returns `Some` exactly when `collides` returns `true`, and a ray that starts inside
+a shape reports its own origin (`t = 0`) rather than the far surface.
+
+Implemented for every volume, `Plane`, `ConvexPolygon`, `Pointcloud` and `Collider`. Line-vs-line
+and line-vs-`Point` pairs are left out, the same pairs `Collides` always answers `false` for.
 
 ### Transforming shapes
 
