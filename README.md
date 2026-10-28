@@ -1,15 +1,19 @@
 # wreck
 
-A 3D collision detection library for Rust. Built on top of `glam` for math and [`hydroplane`](../hydroplane) for runtime-dispatched SIMD acceleration (SSE4 / AVX2 / AVX-512 / NEON, selected per host CPU).
+A 3D collision detection library for Rust. Built on top of `glam` for math, [`squiggle`](https://crates.io/crates/squiggle) for the line types, and [`hydroplane`](../hydroplane) for runtime-dispatched SIMD acceleration (SSE4 / AVX2 / AVX-512 / NEON, selected per host CPU).
+
+`no_std` compatible: disable default features and enable `libm`.
 
 ## Traits
 
 - `Collides<T>` - boolean collision test between two shapes. Every pair of built-in shapes has an implementation in both directions.
 - `Raycast<T>` - where a `Line`, `Ray` or `LineSegment` first meets a shape, as a point and a parameter along the line. Implemented for every volume, `Plane`, `ConvexPolygon`, `Pointcloud` and `Collider`, in both directions.
 - `Scalable` - uniform scaling of a shape.
-- `Transformable` - translate, rotate (via `Mat3` or `Quat`), or apply a full `Affine3` transform.
+- `Transformable` - translate, rotate (via `Mat3A` or `Quat`), or apply a full `Affine3A` transform.
 - `Stretchable` - sweep a shape along a translation vector, producing the convex hull of the motion.
 - `Bounded` - compute bounding volumes: `broadphase()` (bounding sphere), `obb()` (oriented bounding box), and `aabb()` (axis-aligned bounding box). Implemented for all volume types, `ConvexPolygon`, `LineSegment`, `Pointcloud`, and `Collider`. For `Collider`, returns infinite bounds if the collider contains any `Plane`, `Line`, or `Ray`.
+
+Every method taking `f32` types also has a `_d` variant taking the `f64` equivalents (`translate_d`, `stretch_d`, `Sphere::new_d`, ...).
 
 ## Shapes
 
@@ -17,15 +21,20 @@ A 3D collision detection library for Rust. Built on top of `glam` for math and [
 
 - **Sphere** - center + radius
 - **Capsule** - line segment + radius, with a fast path for Z-aligned capsules
+- **Cylinder** - flat-capped cylinder between two endpoints, with a fast path for Z-aligned cylinders
 - **Cuboid** - oriented bounding box (center, 3 axes, half-extents), with fast paths for axis-aligned cases
 - **ConvexPolytope** - arbitrary convex shape defined by half-planes and vertices, with an OBB broadphase
+- **ArrayConvexPolytope<P, V>** - fixed-size, `const`-constructible `ConvexPolytope`
 
 ### Surfaces
 
 - **Plane** - infinite half-space defined by a normal and offset (`normal · x <= d`)
 - **ConvexPolygon** - bounded convex polygon embedded in 3D, defined by a center, normal, and 2D vertices
+- **ArrayConvexPolygon<V>** - fixed-size, `const`-constructible `ConvexPolygon`
 
 ### Lines
+
+Re-exported from `squiggle`.
 
 - **Line** - infinite line through a point with a direction
 - **Ray** - half-line with an origin and direction
@@ -39,31 +48,35 @@ A 3D collision detection library for Rust. Built on top of `glam` for math and [
 
 - **Pointcloud** - point cloud backed by a CAPT spatial index for fast broadphase queries
 
-All shape pairs implement `Collides<T>` for boolean intersection tests. The trait also provides `collides_many` which can be more performant.
-
 ## Collider
 
-`Collider` is a heterogeneous collection of shapes that can be tested against any single shape or another `Collider`. It supports `Transformable`, `Scalable`, applying the operation to every contained shape.
+`Collider` is a heterogeneous collection of shapes that can be tested against any single shape or another `Collider`. Spheres, capsules, cuboids and cylinders are stored column-wise so the SIMD kernels can test a query against all of them at once. A cached bounding sphere rejects distant queries before any narrowphase runs.
 
-`Stretchable` is only implemented for Collider<NoPcl> since there's no way to stretch a point cloud.
+`Transformable` and `Scalable` apply to every contained shape. `Stretchable` is only implemented for `Collider<NoPcl>`, since a point cloud can't be stretched; `Collider::try_stretch` returns `None` if any point clouds are present.
 
 ```rust
 use glam::Vec3;
 use wreck::*;
 
-let mut collider: Collider = Collider {
-    spheres: vec![Sphere::new(Vec3::ZERO, 1.0)],
-    ..Default::default()
-};
-
-// add shapes dynamically
+let mut collider: Collider = Collider::new();
+collider.add(Sphere::new(Vec3::ZERO, 1.0));
 collider.add(Cuboid::from_aabb(Vec3::splat(-1.0), Vec3::splat(1.0)));
+collider.add_vec(vec![Capsule::new(Vec3::ZERO, Vec3::Z, 0.1)]);
 
 // test against a single shape
 let probe = Sphere::new(Vec3::new(0.5, 0.0, 0.0), 0.2);
 if collider.collides(&probe) {
     // hit
 }
+
+// test against another collider
+let mut other: Collider = Collider::new();
+other.add(Cylinder::new(Vec3::ZERO, Vec3::Y, 0.5));
+collider.collides_other(&other);
+
+// merge colliders
+let merged = Collider::union_of(&[&collider, &other]);
+collider.include(other);
 ```
 
 ## Shapes API
@@ -83,6 +96,9 @@ let capsule = Capsule::new(
     Vec3::new(2.0, 0.0, 0.0),
     0.3,
 );
+
+// Cylinder — same as capsule, with flat caps
+let cylinder = Cylinder::new(Vec3::ZERO, Vec3::new(0.0, 0.0, 2.0), 0.5);
 
 // Cuboid — oriented bounding box
 let cuboid = Cuboid::new(
@@ -110,7 +126,7 @@ let seg = LineSegment::new(Vec3::ZERO, Vec3::new(1.0, 1.0, 0.0));
 let plane = Plane::new(Vec3::Y, 0.0);
 let plane = Plane::from_point_normal(Vec3::ZERO, Vec3::Y);
 
-// ConvexPolygon — bounded polygon in 3D
+// ConvexPolygon — bounded polygon in 3D, vertices in CCW order
 let polygon = ConvexPolygon::new(
     Vec3::ZERO,                                          // center
     Vec3::Z,                                             // normal
@@ -129,6 +145,9 @@ let polytope = ConvexPolytope::new(
         Vec3::new( 1.0, -1.0, -1.0), Vec3::new(-1.0, -1.0, -1.0),
     ],
 );
+
+// Pointcloud — points, (min, max) query radius range, radius of each point
+let pcl = Pointcloud::new(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], (0.0, 1.0), 0.01);
 ```
 
 ### Collision testing
@@ -139,10 +158,6 @@ use wreck::Collides;
 // pairwise — works in both directions
 sphere.collides(&capsule);
 capsule.collides(&sphere);
-
-// batch — SIMD-accelerated for some shapes
-let others: Vec<Sphere> = vec![/* ... */];
-sphere.collides_many(&others);
 ```
 
 ### Raycasting
@@ -179,18 +194,19 @@ and line-vs-`Point` pairs are left out, the same pairs `Collides` always answers
 ### Transforming shapes
 
 ```rust
+use glam::{Affine3A, Quat, Vec3A};
 use wreck::{Transformable, Scalable};
 
 let mut sphere = Sphere::new(Vec3::ZERO, 1.0);
 
 // in-place
-sphere.translate(Vec3::new(1.0, 0.0, 0.0));
+sphere.translate(Vec3A::X);
 sphere.scale(2.0);
 
 // or get a new copy
-let moved = sphere.clone().translated([5.0, 0.0, 0.0]);
-let rotated = sphere.clone().rotated_quat(glam::Quat::from_rotation_y(1.0));
-let transformed = sphere.clone().transformed(glam::Affine3::IDENTITY);
+let moved = sphere.translated(Vec3A::new(5.0, 0.0, 0.0));
+let rotated = sphere.rotated_quat(Quat::from_rotation_y(1.0));
+let transformed = sphere.transformed(Affine3A::IDENTITY);
 ```
 
 ### Bounding volumes
@@ -225,7 +241,15 @@ let swept = Cuboid::from_aabb(Vec3::splat(-1.0), Vec3::splat(1.0))
     .stretch(Vec3::new(1.0, 1.0, 0.0));
 ```
 
+Stretch outputs are enums in `wreck::stretched` (`SphereStretch`, `CuboidStretch`, ...) holding whichever shape the sweep produced.
+
 ## Features
 
+- `std` (default) — use `std` for float math
+- `libm` — use `libm` for float math in `no_std` builds; one of `std` or `libm` is required
+- `serde` — `Serialize` / `Deserialize` for all shapes and `Collider`
+- `approx` — `AbsDiffEq` / `RelativeEq` for shapes
+- `quote` — `From<Shape> for TokenStream`, for embedding shapes in generated code
+- `valuable` — `Valuable` for shapes
 - `wreck-assert` — enables internal assertions in all builds
 - `debug-wreck-assert` — enables internal assertions in debug builds only
