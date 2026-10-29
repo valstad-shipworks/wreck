@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use core::fmt::{self, Debug, Display};
 
 use glam::{Mat3, Vec3};
-use hydroplane::{Gang, GangGlamExt, MAX_LANES, Vec3Wide, kernel};
+use hydroplane::{Backend, BackendAll, Gang, GangGlamExt, MAX_LANES, Vec3Wide, kernel};
 
 use crate::shape_soa::{ShapeSoa, SoaShape};
 use crate::{Bounded, Collides, Scalable, Sphere, Transformable};
@@ -298,6 +298,66 @@ impl SpheresSoA {
 
     pub fn iter(&self) -> impl Iterator<Item = Sphere> + '_ {
         (0..self.len).map(|i| self.get(i))
+    }
+
+    #[inline]
+    pub(crate) fn any_collides_sphere_on<S: BackendAll + Backend<f32>>(
+        &self,
+        g: Gang<S>,
+        sphere: &Sphere,
+    ) -> bool {
+        !self.is_empty()
+            && any_collides_sphere_k_on(
+                g,
+                self.x(),
+                self.y(),
+                self.z(),
+                self.r(),
+                sphere.center,
+                sphere.radius,
+            )
+    }
+
+    #[inline]
+    pub(crate) fn count_overlaps_on<S: BackendAll + Backend<f32>>(
+        &self,
+        g: Gang<S>,
+        query: &Sphere,
+    ) -> usize {
+        if self.is_empty() {
+            return 0;
+        }
+        count_overlaps_k_on(
+            g,
+            self.x(),
+            self.y(),
+            self.z(),
+            self.r(),
+            query.center,
+            query.radius,
+            self.len,
+        ) as usize
+    }
+
+    #[inline]
+    pub(crate) fn any_collides_soa_on<S: BackendAll + Backend<f32>>(
+        &self,
+        g: Gang<S>,
+        other: &SpheresSoA,
+    ) -> bool {
+        !self.is_empty()
+            && !other.is_empty()
+            && any_collides_soa_k_on(
+                g,
+                self.x(),
+                self.y(),
+                self.z(),
+                self.r(),
+                other.x(),
+                other.y(),
+                other.z(),
+                other.r(),
+            )
     }
 
     /// Test if any sphere in this SoA collides with the given sphere.
@@ -744,6 +804,38 @@ where
         let bp = shape.broadphase();
         self.broad.any_collides_sphere(&bp)
     }
+
+    pub(crate) fn collides_on<S: BackendAll + Backend<f32>, U>(&self, g: Gang<S>, shape: &U) -> bool
+    where
+        U: Collides<T> + Bounded,
+    {
+        let bp = shape.broadphase();
+        if !self.broad.any_collides_sphere_on(g, &bp) {
+            return false;
+        }
+        let (qx, qy, qz, qr) = (bp.center.x, bp.center.y, bp.center.z, bp.radius);
+        let (bx, by, bz, br) = (
+            self.broad.x(),
+            self.broad.y(),
+            self.broad.z(),
+            self.broad.r(),
+        );
+        self.items.iter().enumerate().any(|(i, item)| {
+            let dx = bx[i] - qx;
+            let dy = by[i] - qy;
+            let dz = bz[i] - qz;
+            let rad = qr + br[i];
+            dx * dx + dy * dy + dz * dz <= rad * rad && shape.test::<false>(item)
+        })
+    }
+
+    pub(crate) fn collides_only_broadphase_on<S: BackendAll + Backend<f32>, U: Bounded>(
+        &self,
+        g: Gang<S>,
+        shape: &U,
+    ) -> bool {
+        self.broad.any_collides_sphere_on(g, &shape.broadphase())
+    }
 }
 
 impl<T> Transformable for BroadCollection<T>
@@ -930,6 +1022,30 @@ where
     pub fn collides_only_broadphase<U: Bounded>(&self, shape: &U) -> bool {
         self.broad.any_collides_sphere(&shape.broadphase())
     }
+
+    pub(crate) fn collides_on<B: BackendAll + Backend<f32>, U>(&self, g: Gang<B>, shape: &U) -> bool
+    where
+        U: Collides<S> + Bounded,
+    {
+        let bp = shape.broadphase();
+        if !self.broad.any_collides_sphere_on(g, &bp) {
+            return false;
+        }
+        let (qx, qy, qz, qr) = (bp.center.x, bp.center.y, bp.center.z, bp.radius);
+        let (bx, by, bz, br) = (
+            self.broad.x(),
+            self.broad.y(),
+            self.broad.z(),
+            self.broad.r(),
+        );
+        (0..self.shapes.len()).any(|i| {
+            let dx = bx[i] - qx;
+            let dy = by[i] - qy;
+            let dz = bz[i] - qz;
+            let rad = qr + br[i];
+            dx * dx + dy * dy + dz * dz <= rad * rad && shape.test::<false>(&self.shapes.get(i))
+        })
+    }
 }
 
 impl<S> Default for ShapeCollection<S>
@@ -1025,7 +1141,7 @@ pub(crate) mod batch {
     #[allow(unused_imports)]
     use crate::F32Ext;
     use glam::Vec3;
-    use hydroplane::{Backend, Gang, GangGlamExt, Mask, Varying, Vec3Wide, kernel};
+    use hydroplane::{Backend, BackendAll, Gang, GangGlamExt, Mask, Varying, Vec3Wide, kernel};
 
     /// Density cutoff (percent of stored shapes surviving the query's broadphase) above which
     /// the SIMD batch narrowphase beats the broad-gated scalar scan. Below it most lanes are
@@ -1041,11 +1157,16 @@ pub(crate) mod batch {
     /// Decide how a query meets a stored collection: reject outright, run the broad-gated scalar
     /// scan, or run the SIMD batch narrowphase.
     #[inline]
-    fn batch_plan(len: usize, broad: &SpheresSoA, query_bp: &Sphere) -> BatchPlan {
+    fn batch_plan<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        len: usize,
+        broad: &SpheresSoA,
+        query_bp: &Sphere,
+    ) -> BatchPlan {
         if len == 0 {
             return BatchPlan::Reject;
         }
-        let surv = broad.count_overlaps(query_bp);
+        let surv = broad.count_overlaps_on(g, query_bp);
         if surv == 0 {
             return BatchPlan::Reject;
         }
@@ -1064,11 +1185,15 @@ pub(crate) mod batch {
     use crate::plane::Plane;
     use crate::sphere::Sphere;
 
-    pub fn plane_vs_spheres_soa(plane: &Plane, soa: &SpheresSoA) -> bool {
+    pub fn plane_vs_spheres_soa<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        plane: &Plane,
+        soa: &SpheresSoA,
+    ) -> bool {
         if soa.is_empty() {
             return false;
         }
-        plane_vs_spheres_k(soa.x(), soa.y(), soa.z(), soa.r(), plane.normal, plane.d)
+        plane_vs_spheres_k_on(g, soa.x(), soa.y(), soa.z(), soa.r(), plane.normal, plane.d)
     }
 
     #[kernel]
@@ -1090,7 +1215,8 @@ pub(crate) mod batch {
     }
 
     #[inline]
-    fn line_vs_spheres_soa_inner(
+    fn line_vs_spheres_soa_inner<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
         origin: Vec3,
         dir: Vec3,
         rdv: f32,
@@ -1101,7 +1227,8 @@ pub(crate) mod batch {
         if soa.is_empty() {
             return false;
         }
-        line_vs_spheres_k(
+        line_vs_spheres_k_on(
+            g,
             soa.x(),
             soa.y(),
             soa.z(),
@@ -1141,8 +1268,13 @@ pub(crate) mod batch {
     }
 
     #[inline]
-    pub fn line_vs_spheres_soa(line: &Line, soa: &SpheresSoA) -> bool {
+    pub fn line_vs_spheres_soa<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        line: &Line,
+        soa: &SpheresSoA,
+    ) -> bool {
         line_vs_spheres_soa_inner(
+            g,
             line.origin,
             line.dir,
             crate::line::rdv(line.dir),
@@ -1153,8 +1285,13 @@ pub(crate) mod batch {
     }
 
     #[inline]
-    pub fn ray_vs_spheres_soa(ray: &Ray, soa: &SpheresSoA) -> bool {
+    pub fn ray_vs_spheres_soa<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        ray: &Ray,
+        soa: &SpheresSoA,
+    ) -> bool {
         line_vs_spheres_soa_inner(
+            g,
             ray.origin,
             ray.dir,
             crate::line::rdv(ray.dir),
@@ -1165,20 +1302,29 @@ pub(crate) mod batch {
     }
 
     #[inline]
-    pub fn segment_vs_spheres_soa(seg: &LineSegment, soa: &SpheresSoA) -> bool {
+    pub fn segment_vs_spheres_soa<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        seg: &LineSegment,
+        soa: &SpheresSoA,
+    ) -> bool {
         let dir = seg.dir();
-        line_vs_spheres_soa_inner(seg.start, dir, crate::line::rdv(dir), 0.0, 1.0, soa)
+        line_vs_spheres_soa_inner(g, seg.start, dir, crate::line::rdv(dir), 0.0, 1.0, soa)
     }
 
     /// True narrowphase sphere-OBB test: one cuboid against many spheres.
     ///
     /// Padding lanes use `r = NaN`, so `dist_sq <= r²` is always false for
     /// them and they cannot produce a false positive.
-    pub fn cuboid_vs_spheres_soa(cuboid: &Cuboid, soa: &SpheresSoA) -> bool {
+    pub fn cuboid_vs_spheres_soa<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        cuboid: &Cuboid,
+        soa: &SpheresSoA,
+    ) -> bool {
         if soa.is_empty() {
             return false;
         }
-        cuboid_vs_spheres_k(
+        cuboid_vs_spheres_k_on(
+            g,
             soa.x(),
             soa.y(),
             soa.z(),
@@ -1220,11 +1366,16 @@ pub(crate) mod batch {
     ///
     /// Computes the squared distance from each sphere center to the capsule's
     /// line segment and compares against `(sphere.radius + capsule.radius)²`.
-    pub fn capsule_vs_spheres_soa(capsule: &Capsule, soa: &SpheresSoA) -> bool {
+    pub fn capsule_vs_spheres_soa<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        capsule: &Capsule,
+        soa: &SpheresSoA,
+    ) -> bool {
         if soa.is_empty() {
             return false;
         }
-        capsule_vs_spheres_k(
+        capsule_vs_spheres_k_on(
+            g,
             soa.x(),
             soa.y(),
             soa.z(),
@@ -1268,11 +1419,16 @@ pub(crate) mod batch {
     ///
     /// Uses the same barrel / end-cap decomposition as `sphere_vs_cylinders_broad`,
     /// but splats cylinder state across the SIMD lanes and iterates the sphere SoA.
-    pub fn cylinder_vs_spheres_soa(cyl: &Cylinder, soa: &SpheresSoA) -> bool {
+    pub fn cylinder_vs_spheres_soa<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        cyl: &Cylinder,
+        soa: &SpheresSoA,
+    ) -> bool {
         if soa.is_empty() {
             return false;
         }
-        cylinder_vs_spheres_k(
+        cylinder_vs_spheres_k_on(
+            g,
             soa.x(),
             soa.y(),
             soa.z(),
@@ -1343,13 +1499,18 @@ pub(crate) mod batch {
     // the final reduction with an explicit `lane < cnt` mask, so a short final
     // chunk can never produce a false positive.
 
-    pub fn sphere_vs_capsules_broad(sphere: &Sphere, col: &ShapeCollection<Capsule>) -> bool {
-        match batch_plan(col.len(), &col.broad, &sphere.broadphase()) {
+    pub fn sphere_vs_capsules_broad<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        sphere: &Sphere,
+        col: &ShapeCollection<Capsule>,
+    ) -> bool {
+        match batch_plan(g, col.len(), &col.broad, &sphere.broadphase()) {
             BatchPlan::Reject => return false,
-            BatchPlan::Scalar => return col.collides(sphere),
+            BatchPlan::Scalar => return col.collides_on(g, sphere),
             BatchPlan::Simd => {}
         }
-        sphere_vs_capsules_broad_k(
+        sphere_vs_capsules_broad_k_on(
+            g,
             col,
             [
                 sphere.center.x,
@@ -1429,13 +1590,18 @@ pub(crate) mod batch {
         false
     }
 
-    pub fn sphere_vs_cuboids_broad(sphere: &Sphere, col: &ShapeCollection<Cuboid>) -> bool {
-        match batch_plan(col.len(), &col.broad, &sphere.broadphase()) {
+    pub fn sphere_vs_cuboids_broad<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        sphere: &Sphere,
+        col: &ShapeCollection<Cuboid>,
+    ) -> bool {
+        match batch_plan(g, col.len(), &col.broad, &sphere.broadphase()) {
             BatchPlan::Reject => return false,
-            BatchPlan::Scalar => return col.collides(sphere),
+            BatchPlan::Scalar => return col.collides_on(g, sphere),
             BatchPlan::Simd => {}
         }
-        sphere_vs_cuboids_broad_k(
+        sphere_vs_cuboids_broad_k_on(
+            g,
             col,
             [
                 sphere.center.x,
@@ -1512,13 +1678,18 @@ pub(crate) mod batch {
         false
     }
 
-    pub fn sphere_vs_cylinders_broad(sphere: &Sphere, col: &ShapeCollection<Cylinder>) -> bool {
-        match batch_plan(col.len(), &col.broad, &sphere.broadphase()) {
+    pub fn sphere_vs_cylinders_broad<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        sphere: &Sphere,
+        col: &ShapeCollection<Cylinder>,
+    ) -> bool {
+        match batch_plan(g, col.len(), &col.broad, &sphere.broadphase()) {
             BatchPlan::Reject => return false,
-            BatchPlan::Scalar => return col.collides(sphere),
+            BatchPlan::Scalar => return col.collides_on(g, sphere),
             BatchPlan::Simd => {}
         }
-        sphere_vs_cylinders_broad_k(
+        sphere_vs_cylinders_broad_k_on(
+            g,
             col,
             [
                 sphere.center.x,
@@ -1617,11 +1788,16 @@ pub(crate) mod batch {
         false
     }
 
-    pub fn plane_vs_capsules_broad(plane: &Plane, col: &ShapeCollection<Capsule>) -> bool {
+    pub fn plane_vs_capsules_broad<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        plane: &Plane,
+        col: &ShapeCollection<Capsule>,
+    ) -> bool {
         if col.is_empty() {
             return false;
         }
-        plane_vs_capsules_broad_k(
+        plane_vs_capsules_broad_k_on(
+            g,
             col,
             [plane.normal.x, plane.normal.y, plane.normal.z, plane.d],
         )
@@ -1676,11 +1852,16 @@ pub(crate) mod batch {
         false
     }
 
-    pub fn plane_vs_cuboids_broad(plane: &Plane, col: &ShapeCollection<Cuboid>) -> bool {
+    pub fn plane_vs_cuboids_broad<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        plane: &Plane,
+        col: &ShapeCollection<Cuboid>,
+    ) -> bool {
         if col.is_empty() {
             return false;
         }
-        plane_vs_cuboids_broad_k(
+        plane_vs_cuboids_broad_k_on(
+            g,
             col,
             [plane.normal.x, plane.normal.y, plane.normal.z, plane.d],
         )
@@ -1731,11 +1912,16 @@ pub(crate) mod batch {
         false
     }
 
-    pub fn plane_vs_cylinders_broad(plane: &Plane, col: &ShapeCollection<Cylinder>) -> bool {
+    pub fn plane_vs_cylinders_broad<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        plane: &Plane,
+        col: &ShapeCollection<Cylinder>,
+    ) -> bool {
         if col.is_empty() {
             return false;
         }
-        plane_vs_cylinders_broad_k(
+        plane_vs_cylinders_broad_k_on(
+            g,
             col,
             [plane.normal.x, plane.normal.y, plane.normal.z, plane.d],
         )
@@ -1799,19 +1985,24 @@ pub(crate) mod batch {
         false
     }
 
-    pub fn capsule_vs_capsules_broad(q: &Capsule, col: &ShapeCollection<Capsule>) -> bool {
-        match batch_plan(col.len(), &col.broad, &q.broadphase()) {
+    pub fn capsule_vs_capsules_broad<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        q: &Capsule,
+        col: &ShapeCollection<Capsule>,
+    ) -> bool {
+        match batch_plan(g, col.len(), &col.broad, &q.broadphase()) {
             BatchPlan::Reject => return false,
-            BatchPlan::Scalar => return col.collides(q),
+            BatchPlan::Scalar => return col.collides_on(g, q),
             BatchPlan::Simd => {}
         }
         let a = q.dir.dot(q.dir);
         if a <= f32::EPSILON {
             // zero-length query capsule degenerates to a sphere
-            return sphere_vs_capsules_broad(&Sphere::new(q.p1, q.radius), col);
+            return sphere_vs_capsules_broad(g, &Sphere::new(q.p1, q.radius), col);
         }
         let (bc, br) = q.bounding_sphere();
-        capsule_vs_capsules_broad_k(
+        capsule_vs_capsules_broad_k_on(
+            g,
             col,
             [bc.x, bc.y, bc.z, br],
             q.p1.to_array(),
@@ -1925,14 +2116,15 @@ pub(crate) mod batch {
     /// Single-dispatch capsule-SoA vs capsule-SoA: the query capsules are walked scalar-outer, each
     /// run through the segment-segment narrowphase over `b` via the `_on` companion — one ISA
     /// dispatch for the whole n×m rather than one per query capsule (the per-query path's cost).
-    pub fn capsules_vs_capsules_soa(
+    pub fn capsules_vs_capsules_soa<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
         a: &ShapeCollection<Capsule>,
         b: &ShapeCollection<Capsule>,
     ) -> bool {
         if a.is_empty() || b.is_empty() {
             return false;
         }
-        capsules_vs_capsules_soa_k(a, b)
+        capsules_vs_capsules_soa_k_on(g, a, b)
     }
 
     #[kernel]
@@ -1969,7 +2161,8 @@ pub(crate) mod batch {
     /// through the barrel/endcap narrowphase over `b` via the `_on` companion (one dispatch total).
     /// The kernel assumes non-degenerate queries; if any query cylinder is zero-length the whole
     /// call defers to the per-query path (which handles the degenerate case).
-    pub fn cylinders_vs_cylinders_soa(
+    pub fn cylinders_vs_cylinders_soa<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
         a: &ShapeCollection<Cylinder>,
         b: &ShapeCollection<Cylinder>,
     ) -> bool {
@@ -1980,12 +2173,15 @@ pub(crate) mod batch {
         for i in 0..a.len() {
             let (dx, dy, dz) = (s.col(3)[i], s.col(4)[i], s.col(5)[i]);
             if dx * dx + dy * dy + dz * dz <= f32::EPSILON {
-                return a.shapes.iter().any(|q| cylinder_vs_cylinders_broad(&q, b));
+                return a
+                    .shapes
+                    .iter()
+                    .any(|q| cylinder_vs_cylinders_broad(g, &q, b));
             }
         }
         // The kernel over-approximates each cylinder by its capsule, so a miss is
         // final but a hit needs the exact per-pair test.
-        cylinders_vs_cylinders_soa_k(a, b)
+        cylinders_vs_cylinders_soa_k_on(g, a, b)
             && a.shapes
                 .iter()
                 .any(|q| b.shapes.iter().any(|c| q.collides(&c)))
@@ -2026,10 +2222,14 @@ pub(crate) mod batch {
         false
     }
 
-    pub fn cylinder_vs_cylinders_broad(q: &Cylinder, col: &ShapeCollection<Cylinder>) -> bool {
-        match batch_plan(col.len(), &col.broad, &q.broadphase()) {
+    pub fn cylinder_vs_cylinders_broad<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        q: &Cylinder,
+        col: &ShapeCollection<Cylinder>,
+    ) -> bool {
+        match batch_plan(g, col.len(), &col.broad, &q.broadphase()) {
             BatchPlan::Reject => return false,
-            BatchPlan::Scalar => return col.collides(q),
+            BatchPlan::Scalar => return col.collides_on(g, q),
             BatchPlan::Simd => {}
         }
         let a = q.dir.dot(q.dir);
@@ -2040,7 +2240,8 @@ pub(crate) mod batch {
         let (bc, br) = q.bounding_sphere();
         // The kernel over-approximates each cylinder by its capsule, so a miss is
         // final but a hit needs the exact per-pair test.
-        cylinder_vs_cylinders_broad_k(
+        cylinder_vs_cylinders_broad_k_on(
+            g,
             col,
             [bc.x, bc.y, bc.z, br],
             q.p1.to_array(),
@@ -2207,14 +2408,19 @@ pub(crate) mod batch {
         false
     }
 
-    pub fn cuboid_vs_cuboids_broad(q: &Cuboid, col: &ShapeCollection<Cuboid>) -> bool {
-        match batch_plan(col.len(), &col.broad, &q.broadphase()) {
+    pub fn cuboid_vs_cuboids_broad<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        q: &Cuboid,
+        col: &ShapeCollection<Cuboid>,
+    ) -> bool {
+        match batch_plan(g, col.len(), &col.broad, &q.broadphase()) {
             BatchPlan::Reject => return false,
-            BatchPlan::Scalar => return col.collides(q),
+            BatchPlan::Scalar => return col.collides_on(g, q),
             BatchPlan::Simd => {}
         }
         let br = q.bounding_sphere_radius();
-        cuboid_vs_cuboids_broad_k(
+        cuboid_vs_cuboids_broad_k_on(
+            g,
             col,
             [q.center.x, q.center.y, q.center.z, br],
             [
@@ -2374,14 +2580,15 @@ pub(crate) mod batch {
 
     /// Single-dispatch capsule-SoA vs cuboid-SoA — query capsules walked scalar-outer, each run
     /// through the breakpoint-sampling narrowphase over `b` via the `_on` companion.
-    pub fn capsules_vs_cuboids_soa(
+    pub fn capsules_vs_cuboids_soa<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
         a: &ShapeCollection<Capsule>,
         b: &ShapeCollection<Cuboid>,
     ) -> bool {
         if a.is_empty() || b.is_empty() {
             return false;
         }
-        capsules_vs_cuboids_soa_k(a, b)
+        capsules_vs_cuboids_soa_k_on(g, a, b)
     }
 
     #[kernel]
@@ -2412,11 +2619,15 @@ pub(crate) mod batch {
 
     /// Single-dispatch sphere-SoA queries over a stored shape collection: each sphere `(c, r)` is
     /// run through the per-query narrowphase over `b` via the `_on` companion (one dispatch total).
-    pub fn spheres_vs_capsules_soa(a: &SpheresSoA, b: &ShapeCollection<Capsule>) -> bool {
+    pub fn spheres_vs_capsules_soa<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        a: &SpheresSoA,
+        b: &ShapeCollection<Capsule>,
+    ) -> bool {
         if a.is_empty() || b.is_empty() {
             return false;
         }
-        spheres_vs_capsules_soa_k(a, b)
+        spheres_vs_capsules_soa_k_on(g, a, b)
     }
 
     #[kernel]
@@ -2434,11 +2645,15 @@ pub(crate) mod batch {
         false
     }
 
-    pub fn spheres_vs_cuboids_soa(a: &SpheresSoA, b: &ShapeCollection<Cuboid>) -> bool {
+    pub fn spheres_vs_cuboids_soa<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        a: &SpheresSoA,
+        b: &ShapeCollection<Cuboid>,
+    ) -> bool {
         if a.is_empty() || b.is_empty() {
             return false;
         }
-        spheres_vs_cuboids_soa_k(a, b)
+        spheres_vs_cuboids_soa_k_on(g, a, b)
     }
 
     #[kernel]
@@ -2456,11 +2671,15 @@ pub(crate) mod batch {
         false
     }
 
-    pub fn spheres_vs_cylinders_soa(a: &SpheresSoA, b: &ShapeCollection<Cylinder>) -> bool {
+    pub fn spheres_vs_cylinders_soa<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        a: &SpheresSoA,
+        b: &ShapeCollection<Cylinder>,
+    ) -> bool {
         if a.is_empty() || b.is_empty() {
             return false;
         }
-        spheres_vs_cylinders_soa_k(a, b)
+        spheres_vs_cylinders_soa_k_on(g, a, b)
     }
 
     #[kernel]
@@ -2479,7 +2698,8 @@ pub(crate) mod batch {
     }
 
     /// Single-dispatch capsule-SoA vs cylinder-SoA (query capsules scalar-outer via the `_on`).
-    pub fn capsules_vs_cylinders_soa(
+    pub fn capsules_vs_cylinders_soa<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
         a: &ShapeCollection<Capsule>,
         b: &ShapeCollection<Cylinder>,
     ) -> bool {
@@ -2489,10 +2709,12 @@ pub(crate) mod batch {
         // A kernel hit is an exact point-to-cylinder sample, so it is final; a miss
         // can hide an interior minimum, so each query re-runs through the exact
         // per-query path (SIMD spine reject, then per-pair confirmation).
-        if capsules_vs_cylinders_soa_k(a, b) {
+        if capsules_vs_cylinders_soa_k_on(g, a, b) {
             return true;
         }
-        a.shapes.iter().any(|q| capsule_vs_cylinders_broad(&q, b))
+        a.shapes
+            .iter()
+            .any(|q| capsule_vs_cylinders_broad(g, &q, b))
     }
 
     #[kernel]
@@ -2521,7 +2743,8 @@ pub(crate) mod batch {
     }
 
     /// Single-dispatch cylinder-SoA vs cuboid-SoA (query cylinders scalar-outer via the `_on`).
-    pub fn cylinders_vs_cuboids_soa(
+    pub fn cylinders_vs_cuboids_soa<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
         a: &ShapeCollection<Cylinder>,
         b: &ShapeCollection<Cuboid>,
     ) -> bool {
@@ -2530,7 +2753,7 @@ pub(crate) mod batch {
         }
         // The kernel over-approximates each cylinder by its capsule (its segment-box
         // test is exact), so a miss is final but a hit needs the exact per-pair test.
-        cylinders_vs_cuboids_soa_k(a, b)
+        cylinders_vs_cuboids_soa_k_on(g, a, b)
             && a.shapes
                 .iter()
                 .any(|q| b.shapes.iter().any(|c| q.collides(&c)))
@@ -2570,14 +2793,19 @@ pub(crate) mod batch {
         false
     }
 
-    pub fn capsule_vs_cuboids_broad(q: &Capsule, col: &ShapeCollection<Cuboid>) -> bool {
-        match batch_plan(col.len(), &col.broad, &q.broadphase()) {
+    pub fn capsule_vs_cuboids_broad<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        q: &Capsule,
+        col: &ShapeCollection<Cuboid>,
+    ) -> bool {
+        match batch_plan(g, col.len(), &col.broad, &q.broadphase()) {
             BatchPlan::Reject => return false,
-            BatchPlan::Scalar => return col.collides(q),
+            BatchPlan::Scalar => return col.collides_on(g, q),
             BatchPlan::Simd => {}
         }
         let (bc, br) = q.bounding_sphere();
-        capsule_vs_cuboids_broad_k(
+        capsule_vs_cuboids_broad_k_on(
+            g,
             col,
             [bc.x, bc.y, bc.z, br],
             q.p1.to_array(),
@@ -2720,14 +2948,19 @@ pub(crate) mod batch {
         false
     }
 
-    pub fn cuboid_vs_capsules_broad(q: &Cuboid, col: &ShapeCollection<Capsule>) -> bool {
-        match batch_plan(col.len(), &col.broad, &q.broadphase()) {
+    pub fn cuboid_vs_capsules_broad<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        q: &Cuboid,
+        col: &ShapeCollection<Capsule>,
+    ) -> bool {
+        match batch_plan(g, col.len(), &col.broad, &q.broadphase()) {
             BatchPlan::Reject => return false,
-            BatchPlan::Scalar => return col.collides(q),
+            BatchPlan::Scalar => return col.collides_on(g, q),
             BatchPlan::Simd => {}
         }
         let br = q.bounding_sphere_radius();
-        cuboid_vs_capsules_broad_k(
+        cuboid_vs_capsules_broad_k_on(
+            g,
             col,
             [q.center.x, q.center.y, q.center.z, br],
             [
@@ -2984,16 +3217,21 @@ pub(crate) mod batch {
             | eval(three_q)
     }
 
-    pub fn cylinder_vs_capsules_broad(q: &Cylinder, col: &ShapeCollection<Capsule>) -> bool {
-        match batch_plan(col.len(), &col.broad, &q.broadphase()) {
+    pub fn cylinder_vs_capsules_broad<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        q: &Cylinder,
+        col: &ShapeCollection<Capsule>,
+    ) -> bool {
+        match batch_plan(g, col.len(), &col.broad, &q.broadphase()) {
             BatchPlan::Reject => return false,
-            BatchPlan::Scalar => return col.collides(q),
+            BatchPlan::Scalar => return col.collides_on(g, q),
             BatchPlan::Simd => {}
         }
         let (bc, br) = q.bounding_sphere();
         // Sample hits are exact point-to-cylinder tests, so a kernel hit is final;
         // a miss can hide an interior minimum between samples.
-        if cylinder_vs_capsules_broad_k(
+        if cylinder_vs_capsules_broad_k_on(
+            g,
             col,
             [bc.x, bc.y, bc.z, br],
             q.p1.to_array(),
@@ -3009,7 +3247,8 @@ pub(crate) mod batch {
         // the exact per-pair test.
         let a = q.dir.dot(q.dir);
         if a > f32::EPSILON
-            && !capsule_vs_capsules_broad_k(
+            && !capsule_vs_capsules_broad_k_on(
+                g,
                 col,
                 [bc.x, bc.y, bc.z, br],
                 q.p1.to_array(),
@@ -3129,16 +3368,21 @@ pub(crate) mod batch {
         false
     }
 
-    pub fn capsule_vs_cylinders_broad(q: &Capsule, col: &ShapeCollection<Cylinder>) -> bool {
-        match batch_plan(col.len(), &col.broad, &q.broadphase()) {
+    pub fn capsule_vs_cylinders_broad<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        q: &Capsule,
+        col: &ShapeCollection<Cylinder>,
+    ) -> bool {
+        match batch_plan(g, col.len(), &col.broad, &q.broadphase()) {
             BatchPlan::Reject => return false,
-            BatchPlan::Scalar => return col.collides(q),
+            BatchPlan::Scalar => return col.collides_on(g, q),
             BatchPlan::Simd => {}
         }
         let (bc, br) = q.bounding_sphere();
         // Sample hits are exact point-to-cylinder tests, so a kernel hit is final;
         // a miss can hide an interior minimum between samples.
-        if capsule_vs_cylinders_broad_k(
+        if capsule_vs_cylinders_broad_k_on(
+            g,
             col,
             [bc.x, bc.y, bc.z, br],
             q.p1.to_array(),
@@ -3153,7 +3397,8 @@ pub(crate) mod batch {
         // per-pair test.
         let a = q.dir.dot(q.dir);
         if a > f32::EPSILON
-            && !cylinder_vs_cylinders_broad_k(
+            && !cylinder_vs_cylinders_broad_k_on(
+                g,
                 col,
                 [bc.x, bc.y, bc.z, br],
                 q.p1.to_array(),
@@ -3368,16 +3613,21 @@ pub(crate) mod batch {
         [1.0, 1.0, 1.0],
     ];
 
-    pub fn cylinder_vs_cuboids_broad(q: &Cylinder, col: &ShapeCollection<Cuboid>) -> bool {
-        match batch_plan(col.len(), &col.broad, &q.broadphase()) {
+    pub fn cylinder_vs_cuboids_broad<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        q: &Cylinder,
+        col: &ShapeCollection<Cuboid>,
+    ) -> bool {
+        match batch_plan(g, col.len(), &col.broad, &q.broadphase()) {
             BatchPlan::Reject => return false,
-            BatchPlan::Scalar => return col.collides(q),
+            BatchPlan::Scalar => return col.collides_on(g, q),
             BatchPlan::Simd => {}
         }
         let (bc, br) = q.bounding_sphere();
         // The kernel over-approximates the cylinder by its capsule (its segment-box
         // test is exact), so a miss is final but a hit needs the exact per-pair test.
-        cylinder_vs_cuboids_broad_k(
+        cylinder_vs_cuboids_broad_k_on(
+            g,
             col,
             [bc.x, bc.y, bc.z, br],
             q.p1.to_array(),
@@ -3480,10 +3730,14 @@ pub(crate) mod batch {
         false
     }
 
-    pub fn cuboid_vs_cylinders_broad(q: &Cuboid, col: &ShapeCollection<Cylinder>) -> bool {
-        match batch_plan(col.len(), &col.broad, &q.broadphase()) {
+    pub fn cuboid_vs_cylinders_broad<S: BackendAll + Backend<f32>>(
+        g: Gang<S>,
+        q: &Cuboid,
+        col: &ShapeCollection<Cylinder>,
+    ) -> bool {
+        match batch_plan(g, col.len(), &col.broad, &q.broadphase()) {
             BatchPlan::Reject => return false,
-            BatchPlan::Scalar => return col.collides(q),
+            BatchPlan::Scalar => return col.collides_on(g, q),
             BatchPlan::Simd => {}
         }
         let br = q.bounding_sphere_radius();
@@ -3498,7 +3752,8 @@ pub(crate) mod batch {
         }
         // The kernel over-approximates each cylinder by its capsule (its segment-box
         // test is exact), so a miss is final but a hit needs the exact per-pair test.
-        cuboid_vs_cylinders_broad_k(
+        cuboid_vs_cylinders_broad_k_on(
+            g,
             col,
             [q.center.x, q.center.y, q.center.z, br],
             [

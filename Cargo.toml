@@ -1,6 +1,6 @@
 [package]
 name = "wreck"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["Bowan Foryt <bowan@valstad.com>"]
@@ -37,10 +37,10 @@ static_assertions = "1.1.0"
 valuable = { version = "0.1", default-features = false, features = ["alloc"], optional = true }
 glam-traits-ext = { version = "0.32.3", default-features = false, optional = true }
 squiggle = { version = "1.0.0", default-features = false }
-hydroplane = { version = "0.1.0", default-features = false, features = ["alloc", "glam"] }
+hydroplane = { version = "0.2.1", default-features = false, features = ["alloc", "glam"] }
 
 [build-dependencies]
-hydroplane-auto = "0.1.0"
+hydroplane-auto = "0.1.1"
 
 [dev-dependencies]
 criterion = "0.8.2"
