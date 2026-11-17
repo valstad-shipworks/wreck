@@ -57,7 +57,7 @@ pub(crate) fn clamped_line_segment_dist_sq(
             let b = d1.dot(d2);
             let denom = a * e - b * b;
 
-            let mut s_n = if denom.abs() > eps {
+            let mut s_n = if denom > eps * a * e {
                 ((b * f - c * e) / denom).clamp(s_min, s_max)
             } else {
                 0.0f32.clamp(s_min, s_max)

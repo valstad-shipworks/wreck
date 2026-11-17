@@ -330,7 +330,7 @@ fn cylinder_capsule_collides<const BROADPHASE: bool>(cyl: &Cylinder, capsule: &C
         if e > eps {
             let b = capsule.dir.dot(cyl.dir);
             let denom = a * e - b * b;
-            if denom.abs() > eps {
+            if denom > eps * a * e {
                 ((b * f - c_val * e) / denom).clamp(0.0, 1.0)
             } else {
                 0.5
@@ -471,8 +471,6 @@ fn cylinder_cuboid_collides<const BROADPHASE: bool>(cyl: &Cylinder, cuboid: &Cub
         }
     }
 
-    // Test 1: Sample cylinder axis at 8 t-values against cuboid (barrel test)
-    // Same approach as capsule-cuboid but the hit means barrel collision.
     let p0_world = cyl.p1 - cuboid.center;
     let (p0, dir) = if cuboid.axis_aligned {
         (
@@ -494,7 +492,6 @@ fn cylinder_cuboid_collides<const BROADPHASE: bool>(cyl: &Cylinder, cuboid: &Cub
         )
     };
     let he = cuboid.half_extents;
-    let rs_sq = cyl.radius * cyl.radius;
 
     // Face-slab reject: the box's own axes are valid separating axes, and the
     // cylinder's exact support along each is the axis interval widened by the
@@ -517,109 +514,138 @@ fn cylinder_cuboid_collides<const BROADPHASE: bool>(cyl: &Cylinder, cuboid: &Cub
         }
     }
 
-    let inv_dir = [
-        if dir[0].abs() > f32::EPSILON {
-            1.0 / dir[0]
-        } else {
-            f32::MAX
-        },
-        if dir[1].abs() > f32::EPSILON {
-            1.0 / dir[1]
-        } else {
-            f32::MAX
-        },
-        if dir[2].abs() > f32::EPSILON {
-            1.0 / dir[2]
-        } else {
-            f32::MAX
-        },
-    ];
+    cylinder_box_exact(Vec3::from(p0), Vec3::from(dir), cyl.rdv, cyl.radius, he)
+}
 
-    let ts = [
-        0.0,
-        1.0,
-        ((-he[0] - p0[0]) * inv_dir[0]).clamp(0.0, 1.0),
-        ((he[0] - p0[0]) * inv_dir[0]).clamp(0.0, 1.0),
-        ((-he[1] - p0[1]) * inv_dir[1]).clamp(0.0, 1.0),
-        ((he[1] - p0[1]) * inv_dir[1]).clamp(0.0, 1.0),
-        ((-he[2] - p0[2]) * inv_dir[2]).clamp(0.0, 1.0),
-        ((he[2] - p0[2]) * inv_dir[2]).clamp(0.0, 1.0),
-    ];
+/// Box edges as corner pairs, corner `k` sitting at `he` signed by bits 0, 1 and 2 of `k`.
+const BOX_EDGES: [(usize, usize); 12] = [
+    (0, 1),
+    (2, 3),
+    (4, 5),
+    (6, 7),
+    (0, 2),
+    (1, 3),
+    (4, 6),
+    (5, 7),
+    (0, 4),
+    (1, 5),
+    (2, 6),
+    (3, 7),
+];
 
-    // Axis-penetration accept: with radius zero the sample set is complete (a
-    // penetrating axis touches the box at one of the entry-face crossings), so
-    // a zero-distance sample proves the cylinder's spine enters the box.
-    if crate::cuboid::capsule_cuboid_eval(ts, Vec3::from(p0), Vec3::from(dir), Vec3::from(he), 0.0)
-    {
+/// The four `BOX_EDGES` bounding each box face.
+const BOX_FACE_EDGES: [[usize; 4]; 6] = [
+    [4, 6, 8, 10],
+    [5, 7, 9, 11],
+    [0, 2, 8, 9],
+    [1, 3, 10, 11],
+    [0, 1, 4, 5],
+    [2, 3, 6, 7],
+];
+
+/// Squared distance from the origin to the part of segment `a`-`b` between parameters `lo`
+/// and `hi`.
+#[inline]
+fn origin_segment_dist_sq(a: Vec3, b: Vec3, lo: f32, hi: f32) -> f32 {
+    let e = b - a;
+    let l2 = e.length_squared();
+    let s = if l2 > 0.0 {
+        (-a.dot(e) / l2).clamp(lo, hi)
+    } else {
+        lo
+    };
+    (a + e * s).length_squared()
+}
+
+/// Solid cylinder against the box `[-he, he]`, with the cylinder given in the box's frame.
+///
+/// The two meet iff the slice of the box between the cap planes comes within `radius` of the
+/// axis line. Seen along the axis that slice is a convex polygon, bounded by box edges cut to
+/// the slice and by the segments where a cap plane crosses a box face. Unless the axis itself
+/// enters the box, the polygon does not contain the axis and its nearest boundary segment
+/// decides. Every step is closed form, so the verdict is exact up to rounding of the inputs
+/// and never shrinks when either shape grows.
+fn cylinder_box_exact(p0: Vec3, dir: Vec3, rdv: f32, radius: f32, he: [f32; 3]) -> bool {
+    let he = Vec3::from(he);
+    let reach = p0.abs().max_element() + dir.abs().max_element() + he.max_element();
+    let limit = radius + 8.0 * f32::EPSILON * reach;
+    let limit_sq = limit * limit;
+
+    if rdv == 0.0 {
+        let outside = (p0.abs() - he).max(Vec3::ZERO);
+        return outside.length_squared() <= limit_sq;
+    }
+
+    let mut enter = 0.0f32;
+    let mut leave = 1.0f32;
+    for i in 0..3 {
+        if dir[i] != 0.0 {
+            let inv = 1.0 / dir[i];
+            let t1 = (-he[i] - p0[i]) * inv;
+            let t2 = (he[i] - p0[i]) * inv;
+            enter = enter.max(t1.min(t2));
+            leave = leave.min(t1.max(t2));
+        } else if p0[i].abs() > he[i] {
+            leave = -1.0;
+        }
+    }
+    if enter <= leave {
         return true;
     }
 
-    // Corner accept: any box corner inside the solid cylinder proves collision.
-    let mut cx = [0.0f32; 8];
-    let mut cy = [0.0f32; 8];
-    let mut cz = [0.0f32; 8];
-    let mut idx = 0;
-    for &sx in &[-1.0f32, 1.0] {
-        for &sy in &[-1.0f32, 1.0] {
-            for &sz in &[-1.0f32, 1.0] {
-                let v = cuboid.center
-                    + cuboid.axes[0] * (he[0] * sx)
-                    + cuboid.axes[1] * (he[1] * sy)
-                    + cuboid.axes[2] * (he[2] * sz);
-                cx[idx] = v.x;
-                cy[idx] = v.y;
-                cz[idx] = v.z;
-                idx += 1;
+    let mut t = [0.0f32; 8];
+    let mut q = [Vec3::ZERO; 8];
+    for k in 0..8 {
+        let sign = Vec3::new(
+            if k & 1 == 0 { -1.0 } else { 1.0 },
+            if k & 2 == 0 { -1.0 } else { 1.0 },
+            if k & 4 == 0 { -1.0 } else { 1.0 },
+        );
+        let w = he * sign - p0;
+        t[k] = w.dot(dir) * rdv;
+        q[k] = w - dir * t[k];
+    }
+
+    let mut crossing = [[None::<Vec3>; 12]; 2];
+    for (e, &(i, j)) in BOX_EDGES.iter().enumerate() {
+        let dt = t[j] - t[i];
+        let (lo, hi) = if dt != 0.0 {
+            let s0 = -t[i] / dt;
+            let s1 = (1.0 - t[i]) / dt;
+            (s0.min(s1).max(0.0), s0.max(s1).min(1.0))
+        } else if (0.0..=1.0).contains(&t[i]) {
+            (0.0, 1.0)
+        } else {
+            continue;
+        };
+        if lo <= hi && origin_segment_dist_sq(q[i], q[j], lo, hi) <= limit_sq {
+            return true;
+        }
+        for (cap, level) in [0.0f32, 1.0].into_iter().enumerate() {
+            if (t[i] < level) != (t[j] < level) {
+                let s = ((level - t[i]) / dt).clamp(0.0, 1.0);
+                crossing[cap][e] = Some(q[i] + (q[j] - q[i]) * s);
             }
         }
     }
-    if cylinder_corners_eval(cx, cy, cz, cyl.p1, cyl.dir, cyl.rdv, rs_sq) {
-        return true;
-    }
 
-    crate::gjk::bodies_collide(
-        &crate::gjk::ConvexBody::cylinder(cyl),
-        &crate::gjk::ConvexBody::cuboid(cuboid),
-    )
-}
-
-/// Are any of the 8 cuboid corners inside the cylinder barrel? A `lane < cnt` mask drops the
-/// inactive tail lanes a wider backend may add.
-#[kernel]
-fn cylinder_corners_eval(
-    ctx: Gang,
-    cx: [f32; 8],
-    cy: [f32; 8],
-    cz: [f32; 8],
-    cyl_p1: Vec3,
-    cyl_dir: Vec3,
-    rdv: f32,
-    rs_sq: f32,
-) -> bool {
-    let zero = ctx.splat(0.0);
-    let one = ctx.splat(1.0);
-    let rs = ctx.splat(rs_sq);
-    let p1v = ctx.splat_vec3(cyl_p1);
-    let dv = ctx.splat_vec3(cyl_dir);
-
-    for (off, cnt, active) in ctx.masked_chunks::<f32>(8) {
-        let w = ctx.load_partial_vec3(
-            [
-                &cx[off..off + cnt],
-                &cy[off..off + cnt],
-                &cz[off..off + cnt],
-            ],
-            0.0,
-        ) - p1v;
-
-        let t = w.dot(dv) * rdv;
-        let in_slab = zero.le(t) & t.le(one);
-
-        let perp = w - dv * t;
-        let r_sq = perp.length_squared();
-
-        if (in_slab & r_sq.le(rs) & active).any() {
-            return true;
+    for cap in &crossing {
+        for face in &BOX_FACE_EDGES {
+            let mut ends = [Vec3::ZERO; 4];
+            let mut n = 0;
+            for &e in face {
+                if let Some(x) = cap[e] {
+                    ends[n] = x;
+                    n += 1;
+                }
+            }
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    if origin_segment_dist_sq(ends[i], ends[j], 0.0, 1.0) <= limit_sq {
+                        return true;
+                    }
+                }
+            }
         }
     }
     false

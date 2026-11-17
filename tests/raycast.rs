@@ -522,10 +522,8 @@ fn fuzz_collider_returns_the_nearest_of_its_shapes() {
             .collect();
         let cuboids: Vec<Cuboid> = (0..rng.random_range(0..4))
             .map(|_| {
-                Cuboid::from_aabb(
-                    rand_vec(&mut rng, 3.0) - Vec3::splat(0.6),
-                    rand_vec(&mut rng, 3.0) + Vec3::splat(0.6),
-                )
+                let (a, b) = (rand_vec(&mut rng, 3.0), rand_vec(&mut rng, 3.0));
+                Cuboid::from_aabb(a.min(b) - Vec3::splat(0.6), a.max(b) + Vec3::splat(0.6))
             })
             .collect();
         let capsules: Vec<Capsule> = (0..rng.random_range(0..3))
