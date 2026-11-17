@@ -2089,7 +2089,7 @@ pub(crate) mod batch {
             let denom = av * e - bdot * bdot;
 
             let s_gen = (((bdot * f - cc * e) / denom).max(zero).min(one))
-                .select(denom.abs().gt(eps), zero);
+                .select(denom.gt(eps * av * e), zero);
             let t_n = (bdot * s_gen + f) / e;
             let below = t_n.lt(zero);
             let above = t_n.gt(one);
@@ -2365,7 +2365,7 @@ pub(crate) mod batch {
             let bdot = d1x * d2x + d1y * d2y + d1z * d2z;
             let denom = av * e - bdot * bdot;
             let s_gen = (((bdot * f - cc * e) / denom).max(zero).min(one))
-                .select(denom.abs().gt(eps), zero);
+                .select(denom.gt(eps * av * e), zero);
             let t_n = (bdot * s_gen + f) / e;
             let below = t_n.lt(zero);
             let above = t_n.gt(one);
@@ -3168,7 +3168,7 @@ pub(crate) mod batch {
         let s_gen = ((bdot * f - c_val * e) / denom)
             .max(zero)
             .min(one)
-            .select(denom.abs().gt(eps), half);
+            .select(denom.gt(eps * a * e), half);
         let s_ea = ((zero - c_val) / a).max(zero).min(one);
         let s_inner = s_gen.select(e.gt(eps), s_ea);
         let s_closest = s_inner.select(a.gt(eps), zero);

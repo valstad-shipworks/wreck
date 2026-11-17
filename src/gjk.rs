@@ -180,102 +180,118 @@ impl<'a> ConvexBody<'a> {
     }
 }
 
-/// Closest point to the origin on the convex hull of `pts[..len]`, by checking
-/// every vertex, edge, and face feature. Compacts the supporting feature's
-/// points to the front of `pts` and returns (closest point, feature size).
-fn closest_on_simplex(pts: &mut [Vec3; 4], len: usize) -> (Vec3, usize) {
-    let mut best_d2 = f32::INFINITY;
-    let mut best_p = pts[0];
-    let mut best_idx = [0usize; 3];
-    let mut best_len = 1usize;
+/// Closest point to the origin on segment `a`-`b`, with the supporting feature: the segment
+/// itself (2) or the end the origin lies beyond (1, that end first).
+fn closest_on_segment(a: Vec3, b: Vec3) -> (Vec3, [Vec3; 2], usize) {
+    let ab = b - a;
+    let l2 = ab.length_squared();
+    let t = if l2 > 0.0 { -a.dot(ab) / l2 } else { 0.0 };
+    if t <= 0.0 {
+        (a, [a, b], 1)
+    } else if t >= 1.0 {
+        (b, [b, a], 1)
+    } else {
+        (a + ab * t, [a, b], 2)
+    }
+}
 
-    for (i, p) in pts.iter().enumerate().take(len) {
-        let d2 = p.length_squared();
+/// Closest point to the origin on triangle `a`-`b`-`c`, with the supporting feature.
+///
+/// The origin projects inside the triangle iff the three sub-triangle areas it forms with the
+/// edges share the normal's sign. Those areas come from cross products of the vertices
+/// themselves, which stay accurate on the long thin triangles GJK builds between a far support
+/// point and a cluster of near ones, where solving the edge Gram system in f32 does not.
+fn closest_on_triangle(a: Vec3, b: Vec3, c: Vec3) -> (Vec3, [Vec3; 3], usize) {
+    let e1 = b - a;
+    let e2 = c - a;
+    let n = e1.cross(e2);
+    let n2 = n.length_squared();
+    if n2 > 1e-12 * e1.length_squared() * e2.length_squared() {
+        let u = n.dot(b.cross(c));
+        let v = n.dot(c.cross(a));
+        let w = n.dot(a.cross(b));
+        if u >= 0.0 && v >= 0.0 && w >= 0.0 {
+            let nearest = if a.length_squared() <= b.length_squared() {
+                if a.length_squared() <= c.length_squared() {
+                    a
+                } else {
+                    c
+                }
+            } else if b.length_squared() <= c.length_squared() {
+                b
+            } else {
+                c
+            };
+            return (n * (n.dot(nearest) / n2), [a, b, c], 3);
+        }
+    }
+    let mut best = (Vec3::ZERO, [a, b, c], 0usize);
+    let mut best_d2 = f32::INFINITY;
+    for (p, q) in [(a, b), (b, c), (c, a)] {
+        let (x, f, n) = closest_on_segment(p, q);
+        let d2 = x.length_squared();
         if d2 < best_d2 {
             best_d2 = d2;
-            best_p = *p;
-            best_idx = [i, 0, 0];
-            best_len = 1;
+            best = (x, [f[0], f[1], Vec3::ZERO], n);
         }
     }
-    for i in 0..len {
-        for j in (i + 1)..len {
-            let (a, b) = (pts[i], pts[j]);
-            let ab = b - a;
-            let l2 = ab.length_squared();
-            if l2 < 1e-16 {
-                continue;
+    best
+}
+
+/// Is the origin inside tetrahedron `pts`? Each face must see the origin on the side of the
+/// opposite vertex. A tetrahedron too flat to have a reliable interior is reported as not
+/// containing it, so the caller falls back to its faces.
+fn tetrahedron_contains_origin(pts: &[Vec3; 4]) -> bool {
+    let side = |v0: Vec3, v1: Vec3, v2: Vec3, opp: Vec3| {
+        let e1 = v1 - v0;
+        let e2 = v2 - v0;
+        let n = e1.cross(e2);
+        let height = n.dot(opp - v0);
+        let flat = 1e-6 * n.length() * (opp - v0).length();
+        if height.abs() <= flat {
+            return false;
+        }
+        height * n.dot(-v0) >= 0.0
+    };
+    let [a, b, c, d] = *pts;
+    side(a, b, c, d) && side(b, c, d, a) && side(c, d, a, b) && side(d, a, b, c)
+}
+
+/// Closest point to the origin on the convex hull of `pts[..len]`. Compacts the supporting
+/// feature's points to the front of `pts` and returns (closest point, feature size); a feature
+/// size of 4 means the origin is inside the tetrahedron.
+fn closest_on_simplex(pts: &mut [Vec3; 4], len: usize) -> (Vec3, usize) {
+    match len {
+        1 => (pts[0], 1),
+        2 => {
+            let (x, f, n) = closest_on_segment(pts[0], pts[1]);
+            pts[..2].copy_from_slice(&f);
+            (x, n)
+        }
+        3 => {
+            let (x, f, n) = closest_on_triangle(pts[0], pts[1], pts[2]);
+            pts[..3].copy_from_slice(&f);
+            (x, n)
+        }
+        _ => {
+            if tetrahedron_contains_origin(pts) {
+                return (Vec3::ZERO, 4);
             }
-            let t = -a.dot(ab) / l2;
-            if t > 0.0 && t < 1.0 {
-                let p = a + ab * t;
-                let d2 = p.length_squared();
+            let [a, b, c, d] = *pts;
+            let mut best = (Vec3::ZERO, [a, b, c], 0usize);
+            let mut best_d2 = f32::INFINITY;
+            for (p, q, r) in [(a, b, c), (a, b, d), (a, c, d), (b, c, d)] {
+                let (x, f, n) = closest_on_triangle(p, q, r);
+                let d2 = x.length_squared();
                 if d2 < best_d2 {
                     best_d2 = d2;
-                    best_p = p;
-                    best_idx = [i, j, 0];
-                    best_len = 2;
+                    best = (x, f, n);
                 }
             }
+            pts[..3].copy_from_slice(&best.1);
+            (best.0, best.2)
         }
     }
-    for i in 0..len {
-        for j in (i + 1)..len {
-            for k in (j + 1)..len {
-                let (a, b, c) = (pts[i], pts[j], pts[k]);
-                let e1 = b - a;
-                let e2 = c - a;
-                let g11 = e1.dot(e1);
-                let g12 = e1.dot(e2);
-                let g22 = e2.dot(e2);
-                let det = g11 * g22 - g12 * g12;
-                if det.abs() < 1e-16 {
-                    continue;
-                }
-                let r1 = -a.dot(e1);
-                let r2 = -a.dot(e2);
-                let u = (r1 * g22 - r2 * g12) / det;
-                let v = (r2 * g11 - r1 * g12) / det;
-                if u > 0.0 && v > 0.0 && u + v < 1.0 {
-                    let p = a + e1 * u + e2 * v;
-                    let d2 = p.length_squared();
-                    if d2 < best_d2 {
-                        best_d2 = d2;
-                        best_p = p;
-                        best_idx = [i, j, k];
-                        best_len = 3;
-                    }
-                }
-            }
-        }
-    }
-    if len == 4 {
-        // Origin-in-tetrahedron by the signed-volume (same-side) test: for each
-        // face, the origin must lie on the same side as the opposite vertex.
-        // Division-free, so the sign stays correct in f32 on the flat-ish
-        // simplices GJK builds, where the barycentric form loses it.
-        let (a, b, c, d) = (pts[0], pts[1], pts[2], pts[3]);
-        let same_side = |v0: Vec3, v1: Vec3, v2: Vec3, opp: Vec3| {
-            let n = (v1 - v0).cross(v2 - v0);
-            // sign(n·(opp - v0)) vs sign(n·(origin - v0)) = sign(-n·v0)
-            (n.dot(opp - v0)) * (n.dot(-v0)) >= 0.0
-        };
-        if same_side(a, b, c, d)
-            && same_side(b, c, d, a)
-            && same_side(c, d, a, b)
-            && same_side(d, a, b, c)
-        {
-            return (Vec3::ZERO, 4);
-        }
-    }
-
-    let feature = [
-        pts[best_idx[0]],
-        pts[best_idx[1.min(best_len - 1)]],
-        pts[best_idx[2.min(best_len - 1)]],
-    ];
-    pts[..best_len].copy_from_slice(&feature[..best_len]);
-    (best_p, best_len)
 }
 
 /// Do two convex bodies intersect (touching, to within the contact tolerance,
@@ -297,6 +313,7 @@ pub(crate) fn bodies_collide(a: &ConvexBody<'_>, b: &ConvexBody<'_>) -> bool {
     let mut pts = [Vec3::ZERO; 4];
     pts[0] = support(d0);
     let mut len = 1usize;
+    let mut prev_dist_sq = f32::INFINITY;
 
     for _ in 0..96 {
         let (v, new_len) = closest_on_simplex(&mut pts, len);
@@ -307,6 +324,13 @@ pub(crate) fn bodies_collide(a: &ConvexBody<'_>, b: &ConvexBody<'_>) -> bool {
         if dist_sq <= margin_sq {
             return true;
         }
+        // Every support point added so far promised a shorter distance. A step that fails to
+        // deliver one has run out of single precision without proving separation, and the
+        // bodies are then within rounding of touching.
+        if dist_sq >= prev_dist_sq {
+            return true;
+        }
+        prev_dist_sq = dist_sq;
         let dist = dist_sq.sqrt();
         // Robust search direction: when the closest feature is a triangle, the
         // origin sits near its plane and `v` is tiny; normalizing it in f32 loses
@@ -332,18 +356,11 @@ pub(crate) fn bodies_collide(a: &ConvexBody<'_>, b: &ConvexBody<'_>) -> bool {
         if dist + h.min(0.0) < 1e-6 * dist.max(1.0) {
             return false;
         }
-        let mut duplicate = false;
-        for p in &pts[..len] {
-            if (*p - w).length_squared() < 1e-12 {
-                duplicate = true;
-                break;
-            }
-        }
-        if duplicate || len == 4 {
+        if pts[..len].iter().any(|p| (*p - w).length_squared() < 1e-12) {
             return false;
         }
         pts[len] = w;
         len += 1;
     }
-    false
+    true
 }

@@ -286,8 +286,10 @@ pub(crate) fn segment_segment_dist_sq(p1: Vec3, d1: Vec3, p2: Vec3, d2: Vec3) ->
             let b = d1.dot(d2);
             let denom = a * e - b * b;
 
-            // If segments not parallel, compute closest point on L1 to L2 and clamp
-            let mut s_n = if denom.abs() > eps {
+            // If segments not parallel, compute closest point on L1 to L2 and clamp.
+            // The parallel test is relative to the segment lengths: an absolute one
+            // would call every pair of short segments parallel.
+            let mut s_n = if denom > eps * a * e {
                 ((b * f - c * e) / denom).clamp(0.0, 1.0)
             } else {
                 0.0
